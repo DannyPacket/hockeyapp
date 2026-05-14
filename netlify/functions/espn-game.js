@@ -252,6 +252,22 @@ async function fetchEspnGameData(id) {
     };
   });
 
+  // Build player stats lookup from boxscore.players (skaters + goalies)
+  const playerStatsById = {};
+  for (const teamPlayers of (raw.boxscore?.players || [])) {
+    for (const group of (teamPlayers.statistics || [])) {
+      const keys     = group.keys || [];
+      const isGoalie = (group.name || "").toLowerCase().includes("goali");
+      for (const entry of (group.athletes || [])) {
+        const pid = String(entry.athlete?.id || "");
+        if (!pid) continue;
+        const statObj = {};
+        (entry.stats || []).forEach((v, i) => { if (keys[i]) statObj[keys[i]] = v; });
+        playerStatsById[pid] = { statObj, isGoalie };
+      }
+    }
+  }
+
   // Three stars from featuredAthletes (firstStar / secondStar / thirdStar)
   // Build team-id → abbreviation map from competitors (they have .abbreviation; featuredAthletes .team does not)
   const teamAbbrById = {};
@@ -262,15 +278,29 @@ async function fetchEspnGameData(id) {
   const stars = (comp.status?.featuredAthletes || [])
     .filter(fa => STAR_ORDER[fa.name])
     .map(fa => {
-      const ath = fa.athlete || {};
-      const teamAbbr = teamAbbrById[fa.team?.id] || fa.team?.abbreviation || fa.team?.name || "";
+      const ath       = fa.athlete || {};
+      const teamAbbr  = teamAbbrById[fa.team?.id] || fa.team?.abbreviation || fa.team?.name || "";
+      const pid       = String(ath.id || fa.playerId || "");
+      const pdata     = playerStatsById[pid] || {};
+      const { statObj = {}, isGoalie = false } = pdata;
+      const statParts = [];
+      if (isGoalie) {
+        if (statObj.saves    != null) statParts.push({ label: "SV",  value: statObj.saves });
+        if (statObj.savePct  != null) statParts.push({ label: "SV%", value: statObj.savePct });
+      } else {
+        const g   = statObj.goals   != null ? parseInt(statObj.goals,   10) : null;
+        const a   = statObj.assists != null ? parseInt(statObj.assists,  10) : null;
+        if (g != null) statParts.push({ label: "G",   value: String(g) });
+        if (a != null) statParts.push({ label: "A",   value: String(a) });
+        if (g != null && a != null) statParts.push({ label: "PTS", value: String(g + a) });
+      }
       return {
         order:    STAR_ORDER[fa.name],
         name:     ath.displayName || ath.fullName || ath.shortName || "",
         team:     teamAbbr,
         pos:      ath.position?.abbreviation || "",
         headshot: ath.headshot?.href || (typeof ath.headshot === "string" ? ath.headshot : "") || "",
-        stats:    [],
+        stats:    statParts,
       };
     })
     .sort((a, b) => a.order - b.order);
