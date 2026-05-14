@@ -519,11 +519,15 @@ function buildEspnStars(stars) {
   }).join("")}</div>`;
 }
 
+const INTL_FLAGS = { CAN: "🇨🇦", USA: "🇺🇸", FIN: "🇫🇮", SWE: "🇸🇪" };
+
 function buildEspnScoring(plays, score) {
   if (!plays || !plays.length) return `<p class="nhl-empty">No scoring data available.</p>`;
   return `<div class="scoring-log">${plays.map(play => {
     const teamAbbr  = play.team || "";
-    const logo      = abbrLogo(teamAbbr);
+    const logo      = INTL_FLAGS[teamAbbr]
+      ? `<span class="score-team-flag">${INTL_FLAGS[teamAbbr]}</span>`
+      : abbrLogo(teamAbbr);
     const shotType  = play.shotType && play.shotType !== "Goal" ? ` · ${play.shotType}` : "";
     const scoreSnap = (play.awayScore !== "" && play.homeScore !== "")
       ? `${score.awayAbbr} ${play.awayScore}–${play.homeScore} ${score.homeAbbr}` : "";

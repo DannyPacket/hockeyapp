@@ -352,4 +352,5 @@ tbody td { padding: 0.65rem 0.8rem; color: var(--text); }
 /* ── Scoring row team logo + score snapshot ── */
 .score-team-logo { display:inline-flex; align-items:center; flex-shrink:0; margin-top:1px; }
 .score-team-logo img { width:42px; height:42px; object-fit:contain; vertical-align:middle; }
+.score-team-flag { font-size:2rem; line-height:1; display:inline-flex; align-items:center; flex-shrink:0; margin-top:1px; width:42px; justify-content:center; }
 .score-snap { font-size:0.72rem; color:var(--gold); margin-top:1px; font-family:var(--font-d); font-weight:600; }

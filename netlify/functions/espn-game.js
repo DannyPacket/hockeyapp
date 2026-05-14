@@ -181,9 +181,11 @@ async function fetchEspnGameData(id) {
     status:    comp.status?.type?.shortDetail || "Final",
   };
 
+  // Periods — three ESPN formats
   const linescore = raw.boxscore?.linescore || [];
   let periods = [];
   if (linescore.length >= 2 && linescore[0]?.columns) {
+    // Format A: linescore rows with .columns (header + team rows)
     const labelCols = (linescore[0].columns || []).slice(0, -1);
     const awayCols  = (linescore[1]?.columns || []).slice(0, -1);
     const homeCols  = (linescore[2]?.columns || []).slice(0, -1);
@@ -193,23 +195,56 @@ async function fetchEspnGameData(id) {
       home:  homeCols[i]?.text ?? "",
     }));
   } else if (linescore.length && linescore[0]?.away !== undefined) {
+    // Format B: per-period objects with away/home
     periods = linescore.map(p => ({
       label: p.displayValue || String(p.period || ""),
       away:  String(p.away ?? ""),
       home:  String(p.home ?? ""),
     }));
+  } else {
+    // Format C: linescores embedded in each competitor (international/tournament games)
+    const awayLs  = awayC.linescores || [];
+    const homeLs  = homeC.linescores || [];
+    const PLABELS = ["1st", "2nd", "3rd", "OT", "SO"];
+    if (awayLs.length) {
+      periods = awayLs.map((ls, i) => ({
+        label: PLABELS[i] || `P${i + 1}`,
+        away:  ls.displayValue || String(ls.value ?? ""),
+        home:  homeLs[i]?.displayValue || String(homeLs[i]?.value ?? ""),
+      }));
+    }
   }
 
+  // Scoring plays — robust participant type matching + text fallback
   const scoringPlays = (raw.plays || []).filter(p => p.scoringPlay).map(p => {
-    const parts   = p.participants || [];
-    const scorer  = parts.find(x => (x.type?.text || "").toLowerCase().includes("scor"));
-    const assists = parts.filter(x => (x.type?.text || "").toLowerCase().includes("assist"));
+    const parts = p.participants || [];
+    const isScorer = t => /scor|goal/i.test(t);
+    const isAssist = t => /assist/i.test(t);
+    let scorerPart  = parts.find(x => isScorer(x.type?.text || ""));
+    let assistParts = parts.filter(x => isAssist(x.type?.text || ""));
+    // Fallback: first participant = scorer, rest = assists
+    if (!scorerPart && parts.length) {
+      scorerPart  = parts[0];
+      assistParts = parts.slice(1);
+    }
+    let scorerName  = scorerPart?.athlete?.displayName || "";
+    let assistNames = assistParts.map(a => a.athlete?.displayName || "").filter(Boolean);
+    // Last resort: parse p.text ("Name (A: Name1, Name2)")
+    if (!scorerName) {
+      const m = (p.text || "").match(/^([^(]+?)(?:\s*\((?:A:|Assists?:)\s*([^)]+)\))?/);
+      if (m) {
+        scorerName  = m[1].trim();
+        assistNames = m[2] ? m[2].split(",").map(s => s.trim()).filter(Boolean) : [];
+      } else {
+        scorerName = p.text || "";
+      }
+    }
     return {
       period:    p.period?.displayValue || "",
       time:      p.clock?.displayValue || "",
       team:      p.team?.abbreviation || "",
-      scorer:    scorer?.athlete?.displayName || p.text || "",
-      assists:   assists.map(a => a.athlete?.displayName || "").filter(Boolean),
+      scorer:    scorerName,
+      assists:   assistNames,
       awayScore: p.awayScore ?? "",
       homeScore: p.homeScore ?? "",
       shotType:  p.scoringType?.displayName || "",
@@ -217,7 +252,60 @@ async function fetchEspnGameData(id) {
     };
   });
 
-  return { score, periods, scoringPlays, stars: [], teamStats: [] };
+  // Three stars from featuredAthletes (firstStar / secondStar / thirdStar)
+  const STAR_ORDER = { firstStar: 1, secondStar: 2, thirdStar: 3 };
+  const stars = (comp.status?.featuredAthletes || [])
+    .filter(fa => STAR_ORDER[fa.name])
+    .map(fa => {
+      const ath = fa.athlete || {};
+      return {
+        order:    STAR_ORDER[fa.name],
+        name:     ath.displayName || ath.shortName || "",
+        team:     fa.team?.abbreviation || "",
+        pos:      ath.position?.abbreviation || "",
+        headshot: ath.headshot?.href || (typeof ath.headshot === "string" ? ath.headshot : "") || "",
+        stats:    [],
+      };
+    })
+    .sort((a, b) => a.order - b.order);
+
+  // Team stats from boxscore.teams[n].statistics
+  const boxTeams  = raw.boxscore?.teams || [];
+  const awayBT    = boxTeams.find(t => t.homeAway === "away") || boxTeams[0] || {};
+  const homeBT    = boxTeams.find(t => t.homeAway === "home") || boxTeams[1] || {};
+  const awayStats = awayBT.statistics || [];
+  const homeStats = homeBT.statistics || [];
+
+  function getStat(stats, ...names) {
+    for (const n of names) {
+      const s = stats.find(x => x.name === n);
+      if (s) return s.displayValue;
+    }
+    return null;
+  }
+
+  const STAT_DEFS = [
+    { names: ["shotsTotal", "shotOnGoal", "shots"], label: "Shots",         fmt: v => v },
+    { names: ["hits"],                               label: "Hits",          fmt: v => v },
+    { names: ["penaltyMinutes", "pim"],              label: "PIM",           fmt: v => v },
+    { names: ["faceOffWinPct", "faceoffWinPct"],     label: "Faceoff %",     fmt: v => `${parseFloat(v).toFixed(1)}%` },
+    { names: ["blockedShots"],                       label: "Blocked Shots", fmt: v => v },
+  ];
+  const teamStats = [];
+  for (const { names, label, fmt } of STAT_DEFS) {
+    const aw = getStat(awayStats, ...names);
+    const hm = getStat(homeStats, ...names);
+    if (aw != null && hm != null) teamStats.push({ label, away: fmt(aw), home: fmt(hm) });
+  }
+  // Power play — insert after PIM
+  const awPPG = getStat(awayStats, "powerPlayGoals") ?? "0";
+  const awPPO = getStat(awayStats, "powerPlayOpportunities") ?? "0";
+  const hmPPG = getStat(homeStats, "powerPlayGoals") ?? "0";
+  const hmPPO = getStat(homeStats, "powerPlayOpportunities") ?? "0";
+  const ppIdx = teamStats.findIndex(s => s.label === "PIM");
+  teamStats.splice(ppIdx + 1, 0, { label: "Power Play", away: `${awPPG}/${awPPO}`, home: `${hmPPG}/${hmPPO}` });
+
+  return { score, periods, scoringPlays, stars, teamStats };
 }
 
 // ── Handler ───────────────────────────────────────────────────
