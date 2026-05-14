@@ -162,6 +162,20 @@ tbody td { padding: 0.65rem 0.8rem; color: var(--text); }
 
 .nhl-detail { padding: 0.85rem 1.1rem; }
 
+.special-event-banner {
+  display: inline-block;
+  background: linear-gradient(90deg, var(--gold), var(--gold-dim));
+  color: #000;
+  font-family: var(--font-d);
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 20px;
+  margin-bottom: 0.6rem;
+}
+
 .nhl-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.65rem; }
 .nhl-score  { display: flex; align-items: center; gap: 1.1rem; }
 .nhl-team   { text-align: center; }

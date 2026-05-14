@@ -62,13 +62,23 @@ function teamLogo(name) {
     : `<img src="${fb}" alt="${name}" class="team-logo" onerror="this.style.display='none'">`;
 }
 
-// Logo by NHL abbreviation directly (e.g. "BOS", "BUF") — used for scoring plays
+// Logo by abbreviation — handles both NHL teams and international/tournament teams (CAN, USA, etc.)
 function abbrLogo(abbr) {
   if (!abbr) return "";
   const a = abbr.toLowerCase();
-  const pri = `https://assets.nhle.com/logos/nhl/svg/${abbr.toUpperCase()}_light.svg`;
-  const fb  = `https://a.espncdn.com/combiner/i?img=/i/teamlogos/nhl/500/${a}.png&h=40&w=40`;
-  return `<img src="${pri}" alt="${abbr}" class="team-logo" onerror="this.src='${fb}';this.onerror=function(){this.style.display='none'};">`;
+  const NHL_ABBRS = new Set([
+    "ana","ari","bos","buf","cgy","car","chi","col","cbj","dal","det","edm","fla",
+    "lak","min","mtl","nsh","njd","nyi","nyr","ott","phi","pit","sjs","sea",
+    "stl","tbl","tor","van","vgk","wsh","wpg","uta",
+  ]);
+  if (NHL_ABBRS.has(a)) {
+    const pri = `https://assets.nhle.com/logos/nhl/svg/${abbr.toUpperCase()}_light.svg`;
+    const fb  = `https://a.espncdn.com/combiner/i?img=/i/teamlogos/nhl/500/${a}.png&h=40&w=40`;
+    return `<img src="${pri}" alt="${abbr}" class="team-logo" onerror="this.src='${fb}';this.onerror=function(){this.style.display='none'};">`;
+  }
+  // International / tournament teams — ESPN country logo CDN
+  const src = `https://a.espncdn.com/combiner/i?img=/i/teamlogos/countries/500/${a}.png&h=40&w=40`;
+  return `<img src="${src}" alt="${abbr}" class="team-logo" onerror="this.style.display='none'">`;
 }
 
 // ── NHL GAME ID MAP ───────────────────────────────────────────
@@ -132,6 +142,7 @@ let expandSeason = null;  // season string
 let expandGdWin  = null;  // gd wins index
 let expandGdLoss = null;  // gd losses index
 let expandGl     = null;  // game log row index
+let expandSp     = null;  // special events row index
 
 const nhlCache    = {};  // unused — kept for compat
 const gameIdCache = {};  // unused — kept for compat
@@ -341,6 +352,8 @@ function sortRows(rows, key, colMap) {
 // Static map of known ESPN game IDs: "YYYY-MM-DD" → espn event id
 const ESPN_GAME_ID_MAP = {
   "2026-04-23": "401869759",   // BUF @ BOS  Apr 23 2026 (R1G3)
+  "2025-02-20": "401688921",   // 4 Nations Face-Off Final: CAN vs USA
+  // Add future special-event ESPN game IDs here keyed by "YYYY-MM-DD"
 };
 
 const espnCache = {};  // "YYYY-MM-DD" → normalised game data from our proxy
@@ -412,6 +425,8 @@ function renderEspnDetail(panel, data, g) {
   const espnUrl = data.eventId
     ? `https://www.espn.com/nhl/game/_/gameId/${data.eventId}`
     : `https://www.espn.com/nhl/scoreboard`;
+  const isSpecial = (g.seasonType || "").toLowerCase() === "special";
+  const eventLabel = isSpecial && g.notes ? g.notes : (isSpecial ? "Special Event" : "");
 
   // Period breakdown
   const periodHTML = (periods || []).map(p => {
@@ -426,9 +441,11 @@ function renderEspnDetail(panel, data, g) {
 
   panel.innerHTML = `
     <div class="nhl-detail">
+      ${eventLabel ? `<div class="special-event-banner">${eventLabel}</div>` : ""}
       <div class="nhl-header">
         <div class="nhl-score-block">
           <div class="nhl-team-col">
+            ${abbrLogo(score.awayAbbr)}
             <div class="nhl-abbr">${score.awayAbbr}</div>
             <div class="nhl-goals">${score.awayScore}</div>
           </div>
@@ -437,6 +454,7 @@ function renderEspnDetail(panel, data, g) {
             ${periodHTML ? `<div class="period-breakdown">${periodHTML}</div>` : ""}
           </div>
           <div class="nhl-team-col">
+            ${abbrLogo(score.homeAbbr)}
             <div class="nhl-abbr">${score.homeAbbr}</div>
             <div class="nhl-goals">${score.homeScore}</div>
           </div>
@@ -909,20 +927,19 @@ function renderSpecial(games) {
   document.getElementById("sp-gf").textContent = hg;
   document.getElementById("sp-ga").textContent = ag;
 
-  const sorted = [...games].sort((a,b) => {
-    const at=a.spAwayTeam||a.opponent, bt=b.spAwayTeam||b.opponent;
-    const c=at.localeCompare(bt); return c||((a.spHomeTeam||"").localeCompare(b.spHomeTeam||""));
-  });
+  const sorted = [...games].sort((a,b) => new Date(b.date) - new Date(a.date));
 
-  document.querySelector("#special-table tbody").innerHTML = sorted.map(g => {
+  const tbody = document.querySelector("#special-table tbody");
+  tbody.innerHTML = sorted.map((g, i) => {
     const hs=parseInt(g.spHomeScore,10), as_=parseInt(g.spAwayScore,10);
     const at=g.spAwayTeam||g.opponent, ht=g.spHomeTeam||"—";
-    const ot=g.spOvertime.toLowerCase()==="yes"?"Yes":"";
+    const ot=(g.spOvertime||"").toLowerCase()==="yes"?"Yes":"";
     let winner="—";
     if (!isNaN(hs)&&!isNaN(as_)) winner = hs>as_?ht:as_>hs?at:"Tie";
     const score=(!isNaN(as_)&&!isNaN(hs))?`${as_}–${hs}`:"—";
-    return `<tr>
-      <td>${fmtDate(g.date)}</td>
+    const isOpen = expandSp === i;
+    return `<tr class="main-row sp-row${isOpen ? " row-open" : ""}" data-sp-i="${i}" style="cursor:pointer" title="Click to view game details">
+      <td>${fmtDate(g.date)} <span class="chevron">${isOpen ? "▴" : "▾"}</span></td>
       <td>${g.homeAway==="Home"?"🏠":"✈️"} ${g.homeAway}</td>
       <td>${teamLogo(at)}<span>${at}</span></td>
       <td>${teamLogo(ht)}<span>${ht}</span></td>
@@ -931,8 +948,21 @@ function renderSpecial(games) {
       <td style="text-align:center;color:var(--ot)">${ot}</td>
       <td class="dim">${g.guests.join(", ")||"—"}</td>
       <td class="dim">${g.notes||"—"}</td>
-    </tr>`;
+    </tr>
+    ${isOpen ? `<tr class="sp-expand-tr"><td colspan="9" style="padding:0"><div class="nhl-panel sp-panel" id="sp-panel-${i}"><div class="nhl-loading">Loading game data…</div></div></td></tr>` : ""}`;
   }).join("");
+
+  tbody.querySelectorAll(".sp-row").forEach(tr => {
+    tr.addEventListener("click", () => {
+      const i = +tr.dataset.spI;
+      expandSp = expandSp === i ? null : i;
+      renderSpecial(games);
+    });
+  });
+
+  if (expandSp !== null && expandSp < sorted.length) {
+    loadNhlDetailForGame(sorted[expandSp], `sp-panel-${expandSp}`);
+  }
 }
 
 // ── UTILS ─────────────────────────────────────────────────────
