@@ -393,6 +393,9 @@ async function fetchEspnGame(g) {
     if (!res.ok) throw new Error(`Proxy error ${res.status}`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
+    console.log("[ESPN] stars:", data.stars?.length, data.stars?.map(s => s.name));
+    console.log("[ESPN] teamStats:", data.teamStats?.length, data.teamStats?.map(s => s.label));
+    console.log("[ESPN] scoringPlays:", data.scoringPlays?.length);
     espnCache[dateStr] = data;
     return data;
   } catch (err) {

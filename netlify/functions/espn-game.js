@@ -253,15 +253,21 @@ async function fetchEspnGameData(id) {
   });
 
   // Three stars from featuredAthletes (firstStar / secondStar / thirdStar)
+  // Build team-id → abbreviation map from competitors (they have .abbreviation; featuredAthletes .team does not)
+  const teamAbbrById = {};
+  competitors.forEach(c => {
+    if (c.team?.id) teamAbbrById[c.team.id] = c.team?.abbreviation || c.team?.name || "";
+  });
   const STAR_ORDER = { firstStar: 1, secondStar: 2, thirdStar: 3 };
   const stars = (comp.status?.featuredAthletes || [])
     .filter(fa => STAR_ORDER[fa.name])
     .map(fa => {
       const ath = fa.athlete || {};
+      const teamAbbr = teamAbbrById[fa.team?.id] || fa.team?.abbreviation || fa.team?.name || "";
       return {
         order:    STAR_ORDER[fa.name],
-        name:     ath.displayName || ath.shortName || "",
-        team:     fa.team?.abbreviation || "",
+        name:     ath.displayName || ath.fullName || ath.shortName || "",
+        team:     teamAbbr,
         pos:      ath.position?.abbreviation || "",
         headshot: ath.headshot?.href || (typeof ath.headshot === "string" ? ath.headshot : "") || "",
         stats:    [],
@@ -269,12 +275,15 @@ async function fetchEspnGameData(id) {
     })
     .sort((a, b) => a.order - b.order);
 
-  // Team stats from boxscore.teams[n].statistics
+  // Team stats from boxscore.teams[n].statistics (or .team.statistics)
   const boxTeams  = raw.boxscore?.teams || [];
   const awayBT    = boxTeams.find(t => t.homeAway === "away") || boxTeams[0] || {};
   const homeBT    = boxTeams.find(t => t.homeAway === "home") || boxTeams[1] || {};
-  const awayStats = awayBT.statistics || [];
-  const homeStats = homeBT.statistics || [];
+  const awayStats = awayBT.statistics || awayBT.team?.statistics || [];
+  const homeStats = homeBT.statistics || homeBT.team?.statistics || [];
+  console.log("[ESPN] boxTeams count:", boxTeams.length, "awayStats:", awayStats.length, "homeStats:", homeStats.length);
+  console.log("[ESPN] featuredAthletes count:", (comp.status?.featuredAthletes || []).length);
+  console.log("[ESPN] stars found:", stars.length, stars.map(s => s.name));
 
   function getStat(stats, ...names) {
     for (const n of names) {
@@ -288,7 +297,7 @@ async function fetchEspnGameData(id) {
     { names: ["shotsTotal", "shotOnGoal", "shots"], label: "Shots",         fmt: v => v },
     { names: ["hits"],                               label: "Hits",          fmt: v => v },
     { names: ["penaltyMinutes", "pim"],              label: "PIM",           fmt: v => v },
-    { names: ["faceOffWinPct", "faceoffWinPct"],     label: "Faceoff %",     fmt: v => `${parseFloat(v).toFixed(1)}%` },
+    { names: ["faceOffWinPct","faceoffWinPct","faceOffsWonPct","faceoffWonPct"], label: "Faceoff %", fmt: v => `${parseFloat(v).toFixed(1)}%` },
     { names: ["blockedShots"],                       label: "Blocked Shots", fmt: v => v },
   ];
   const teamStats = [];
