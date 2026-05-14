@@ -215,6 +215,12 @@ async function fetchEspnGameData(id) {
     }
   }
 
+  // Team ID → abbreviation map (built early so scoring plays can use it)
+  const teamAbbrById = {};
+  competitors.forEach(c => {
+    if (c.team?.id) teamAbbrById[c.team.id] = c.team?.abbreviation || c.team?.name || "";
+  });
+
   // Scoring plays — robust participant type matching + text fallback
   const scoringPlays = (raw.plays || []).filter(p => p.scoringPlay).map(p => {
     const parts = p.participants || [];
@@ -229,20 +235,22 @@ async function fetchEspnGameData(id) {
     }
     let scorerName  = scorerPart?.athlete?.displayName || "";
     let assistNames = assistParts.map(a => a.athlete?.displayName || "").filter(Boolean);
-    // Last resort: parse p.text ("Name (A: Name1, Name2)")
     if (!scorerName) {
-      const m = (p.text || "").match(/^([^(]+?)(?:\s*\((?:A:|Assists?:)\s*([^)]+)\))?/);
-      if (m) {
-        scorerName  = m[1].trim();
-        assistNames = m[2] ? m[2].split(",").map(s => s.trim()).filter(Boolean) : [];
-      } else {
-        scorerName = p.text || "";
-      }
+      // ESPN text format: "Name Goal (N) Shot Type, assists: Name1 (N), Name2 (N)"
+      const raw   = p.text || "";
+      const clean = raw.replace(/\s*\(\d+\)/g, "");
+      const aiIdx = clean.search(/,?\s*assists?:/i);
+      let   sRaw  = aiIdx >= 0 ? clean.slice(0, aiIdx) : clean;
+      const aRaw  = aiIdx >= 0 ? clean.slice(aiIdx).replace(/^,?\s*assists?:\s*/i, "") : "";
+      sRaw        = sRaw.replace(/\s+Goal\b.*/i, "").trim();
+      scorerName  = sRaw || raw;
+      assistNames = aRaw ? aRaw.split(",").map(s => s.trim()).filter(Boolean) : [];
     }
+    const teamAbbr = p.team?.abbreviation || teamAbbrById[p.team?.id] || p.team?.name || "";
     return {
       period:    p.period?.displayValue || "",
       time:      p.clock?.displayValue || "",
-      team:      p.team?.abbreviation || "",
+      team:      teamAbbr,
       scorer:    scorerName,
       assists:   assistNames,
       awayScore: p.awayScore ?? "",
@@ -269,11 +277,6 @@ async function fetchEspnGameData(id) {
   }
 
   // Three stars from featuredAthletes (firstStar / secondStar / thirdStar)
-  // Build team-id → abbreviation map from competitors (they have .abbreviation; featuredAthletes .team does not)
-  const teamAbbrById = {};
-  competitors.forEach(c => {
-    if (c.team?.id) teamAbbrById[c.team.id] = c.team?.abbreviation || c.team?.name || "";
-  });
   const STAR_ORDER = { firstStar: 1, secondStar: 2, thirdStar: 3 };
   const stars = (comp.status?.featuredAthletes || [])
     .filter(fa => STAR_ORDER[fa.name])

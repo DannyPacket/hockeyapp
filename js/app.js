@@ -522,7 +522,8 @@ function buildEspnStars(stars) {
   }).join("")}</div>`;
 }
 
-const INTL_FLAGS = { CAN: "🇨🇦", USA: "🇺🇸", FIN: "🇫🇮", SWE: "🇸🇪" };
+const INTL_FLAGS = { CAN: "🇨🇦", USA: "🇺🇸", FIN: "🇫🇮", SWE: "🇸🇪",
+                     Canada: "🇨🇦", "United States": "🇺🇸", Finland: "🇫🇮", Sweden: "🇸🇪" };
 
 function buildEspnScoring(plays, score) {
   if (!plays || !plays.length) return `<p class="nhl-empty">No scoring data available.</p>`;
