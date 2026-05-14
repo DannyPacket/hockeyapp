@@ -62,7 +62,7 @@ function teamLogo(name) {
     : `<img src="${fb}" alt="${name}" class="team-logo" onerror="this.style.display='none'">`;
 }
 
-// Logo by abbreviation — handles both NHL teams and international/tournament teams (CAN, USA, etc.)
+// Logo by abbreviation — handles NHL teams and international/tournament teams
 function abbrLogo(abbr) {
   if (!abbr) return "";
   const a = abbr.toLowerCase();
@@ -76,7 +76,16 @@ function abbrLogo(abbr) {
     const fb  = `https://a.espncdn.com/combiner/i?img=/i/teamlogos/nhl/500/${a}.png&h=40&w=40`;
     return `<img src="${pri}" alt="${abbr}" class="team-logo" onerror="this.src='${fb}';this.onerror=function(){this.style.display='none'};">`;
   }
-  // International / tournament teams — ESPN country logo CDN
+  // Country flags via flagcdn.com (works on Windows; emoji flags don't)
+  const COUNTRY_ISO = {
+    can: "ca", ca: "ca", usa: "us", us: "us",
+    fin: "fi", fi: "fi", swe: "se", se: "se",
+  };
+  const iso = COUNTRY_ISO[a];
+  if (iso) {
+    return `<img src="https://flagcdn.com/w40/${iso}.png" alt="${abbr}" class="team-logo flag-img" onerror="this.style.display='none'">`;
+  }
+  // Generic ESPN country logo fallback
   const src = `https://a.espncdn.com/combiner/i?img=/i/teamlogos/countries/500/${a}.png&h=40&w=40`;
   return `<img src="${src}" alt="${abbr}" class="team-logo" onerror="this.style.display='none'">`;
 }
@@ -522,16 +531,11 @@ function buildEspnStars(stars) {
   }).join("")}</div>`;
 }
 
-const INTL_FLAGS = { CAN: "🇨🇦", USA: "🇺🇸", FIN: "🇫🇮", SWE: "🇸🇪",
-                     Canada: "🇨🇦", "United States": "🇺🇸", Finland: "🇫🇮", Sweden: "🇸🇪" };
-
 function buildEspnScoring(plays, score) {
   if (!plays || !plays.length) return `<p class="nhl-empty">No scoring data available.</p>`;
   return `<div class="scoring-log">${plays.map(play => {
     const teamAbbr  = play.team || "";
-    const logo      = INTL_FLAGS[teamAbbr]
-      ? `<span class="score-team-flag">${INTL_FLAGS[teamAbbr]}</span>`
-      : abbrLogo(teamAbbr);
+    const logo      = abbrLogo(teamAbbr);
     const shotType  = play.shotType && play.shotType !== "Goal" ? ` · ${play.shotType}` : "";
     const scoreSnap = (play.awayScore !== "" && play.homeScore !== "")
       ? `${score.awayAbbr} ${play.awayScore}–${play.homeScore} ${score.homeAbbr}` : "";
