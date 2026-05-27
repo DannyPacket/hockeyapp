@@ -23,7 +23,7 @@ html { font-size: 16px; scroll-behavior: smooth; }
 body { background: var(--black); color: var(--text); font-family: var(--font-b); min-height: 100vh; line-height: 1.5; }
 
 /* ── HEADER ── */
-header { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
+header { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10001; }
 .header-top { padding: 0.75rem 2rem; border-bottom: 1px solid var(--border); }
 .site-title { font-family: var(--font-d); font-size: 1.5rem; font-weight: 900; color: var(--gold); letter-spacing: 0.04em; text-transform: uppercase; line-height: 1; }
 
@@ -59,6 +59,50 @@ main { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; }
 .pill { font-family: var(--font-d); font-size: 0.85rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); padding: 0.4rem 1rem; border-radius: 999px; cursor: pointer; transition: all 0.15s; }
 .pill:hover { border-color: var(--gold-dim); color: var(--text); }
 .pill.active { background: var(--gold); color: var(--black); border-color: var(--gold); }
+
+.season-dd-wrap { position: relative; }
+.dd-open .season-dd-trigger.pill .chevron { transform: rotate(180deg); }
+
+.season-dd-panel {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10000;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.4rem;
+  min-width: 150px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.6);
+  animation: slideIn 0.15s ease;
+}
+.season-dd-panel.open { display: block; }
+
+.season-dd-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--font-d);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  transition: background 0.1s, color 0.1s;
+  user-select: none;
+}
+.season-dd-item:hover { background: var(--surface3); color: var(--text); }
+.season-dd-item input[type="checkbox"] {
+  accent-color: var(--gold);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
 
 /* ── SECTION HEADINGS ── */
 .section-heading { font-family: var(--font-d); font-size: 1.1rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold); margin: 2rem 0 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
@@ -329,6 +373,151 @@ tbody td { padding: 0.65rem 0.8rem; color: var(--text); }
 .star-card-body { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
 .star-headshot { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border); flex-shrink: 0; background: var(--surface3); }
 
+/* ── SEASON DROPDOWN DIVIDER ── */
+.season-dd-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.3rem 0.25rem;
+}
+.season-dd-all { border-bottom: none; }
+
+/* ── ARENA MAP ── */
+#arena-map {
+  height: 560px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  margin-bottom: 1.5rem;
+  isolation: isolate;
+}
+
+/* Team logo markers */
+.logo-icon-wrap {
+  background: transparent !important;
+  border: none !important;
+  overflow: visible !important;
+}
+.arena-logo-marker {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(10,10,10,0.72);
+  border: 2px solid rgba(255,255,255,0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  padding: 3px;
+}
+.arena-logo-marker img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  display: block;
+}
+.arena-logo-marker:hover { transform: scale(1.2); }
+.arena-logo-dim img { filter: grayscale(1) opacity(0.35); }
+.arena-logo-selected {
+  border-color: var(--gold) !important;
+  box-shadow: 0 0 0 2px rgba(255,184,28,0.35), 0 3px 12px rgba(0,0,0,0.6) !important;
+}
+
+/* Arena popup */
+.arena-popup-wrap .leaflet-popup-content-wrapper {
+  background: #161616 !important;
+  border: 1px solid rgba(255,184,28,0.3) !important;
+  border-radius: 10px !important;
+  color: var(--text) !important;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.7) !important;
+  padding: 0 !important;
+}
+.arena-popup-wrap .leaflet-popup-content {
+  margin: 0 !important;
+  padding: 0.65rem 0.85rem !important;
+}
+.arena-popup-wrap .leaflet-popup-tip-container { display: none; }
+.arena-popup-wrap a.leaflet-popup-close-button {
+  color: #666 !important;
+  font-size: 18px !important;
+  padding: 4px 8px !important;
+  top: 2px !important;
+  right: 2px !important;
+}
+.arena-popup-wrap a.leaflet-popup-close-button:hover { color: var(--gold) !important; }
+
+.arena-popup { font-family: var(--font-b); min-width: 200px; }
+.arena-popup-main { display: flex; align-items: flex-start; gap: 0.7rem; }
+.arena-popup-info { flex: 1; min-width: 0; }
+.arena-popup-team {
+  font-family: var(--font-d);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+.arena-popup-arena { margin-top: 2px; }
+.arena-popup-arena a {
+  color: var(--text);
+  font-size: 0.82rem;
+  text-decoration: underline dotted rgba(255,255,255,0.3);
+  text-underline-offset: 3px;
+  transition: color 0.15s;
+}
+.arena-popup-arena a:hover { color: var(--gold); text-decoration: underline; }
+.arena-popup-logo {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  flex-shrink: 0;
+  margin-top: -2px;
+}
+.arena-popup-stats {
+  font-family: var(--font-d);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--win);
+  margin-top: 6px;
+  letter-spacing: 0.03em;
+}
+
+/* Arena tooltip */
+.arena-tooltip.leaflet-tooltip {
+  background: #161616 !important;
+  border: 1px solid rgba(255,184,28,0.3) !important;
+  border-radius: 8px !important;
+  padding: 0.5rem 0.8rem !important;
+  box-shadow: 0 6px 22px rgba(0,0,0,0.65) !important;
+  color: var(--text) !important;
+  white-space: nowrap;
+}
+.arena-tooltip.leaflet-tooltip-top::before {
+  border-top-color: rgba(255,184,28,0.3) !important;
+}
+.arena-tip-team {
+  font-family: var(--font-d);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.arena-tip-arena {
+  font-size: 0.82rem;
+  color: var(--text);
+  margin-top: 2px;
+}
+.arena-tip-stats {
+  font-family: var(--font-d);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--win);
+  margin-top: 5px;
+  letter-spacing: 0.03em;
+}
+
 /* Scoring log — scrollable if tall */
 .scoring-log {
   max-height: 340px;
@@ -348,6 +537,163 @@ tbody td { padding: 0.65rem 0.8rem; color: var(--text); }
 .gl-date-btn { color: var(--gold); text-decoration: underline dotted rgba(255,184,28,0.4); text-underline-offset:3px; }
 .gl-expand-tr td { padding: 0 !important; background: var(--surface2); border-bottom: 1px solid var(--border); }
 .gl-panel { border-left: 3px solid var(--gold); animation: slideIn 0.18s ease; }
+
+/* ── PLAYER STATS TAB ── */
+.ps-player-filter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+
+/* Team dropdown */
+.ps-team-dropdown { position: relative; }
+.ps-team-dropdown.dd-open .ps-team-btn .chevron { transform: rotate(180deg); }
+.ps-team-panel {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 240px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  overflow: hidden;
+  z-index: 300;
+  animation: slideIn 0.15s ease;
+}
+.ps-team-panel.open { display: block; }
+.ps-dd-presets {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.6rem 0.6rem 0.4rem;
+  flex-wrap: wrap;
+}
+.ps-dd-presets .pill { font-size: 0.75rem; padding: 0.25rem 0.65rem; }
+.ps-dd-team-list {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 0.2rem 0;
+}
+.ps-dd-team-list .season-dd-item .team-logo { width: 18px; height: 18px; }
+
+.ps-progress-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.ps-progress-label {
+  font-family: var(--font-d);
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 0.6rem;
+}
+.ps-progress-bar-track {
+  height: 6px;
+  background: var(--surface3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.ps-progress-bar-fill {
+  height: 100%;
+  background: var(--gold);
+  border-radius: 3px;
+  transition: width 0.25s ease;
+}
+
+/* Two-column skaters / goalies layout */
+.ps-tables-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  align-items: start;
+  margin-top: 0.5rem;
+}
+.ps-tables-grid.ps-single-col {
+  grid-template-columns: 1fr;
+}
+@media (max-width: 900px) {
+  .ps-tables-grid { grid-template-columns: 1fr; }
+}
+
+/* Skater table column alignment */
+#ps-skaters-table thead th { cursor: default; }
+#ps-skaters-table thead th.sortable { cursor: pointer; }
+#ps-skaters-table thead th.ps-sort-active { color: var(--gold); }
+#ps-skaters-table thead th:nth-child(n+2),
+#ps-goalies-table thead th:nth-child(n+2) { text-align: center; }
+#ps-skaters-table td:nth-child(n+3) {
+  text-align: center;
+  font-family: var(--font-d);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+#ps-skaters-table td:nth-child(6) { color: var(--gold); }
+
+/* Goalie table column alignment */
+#ps-goalies-table td:nth-child(n+3) {
+  text-align: center;
+  font-family: var(--font-d);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+#ps-goalies-table td:nth-child(4) { color: var(--win); }
+#ps-goalies-table td:nth-child(5) { color: var(--loss); }
+#ps-goalies-table td:nth-child(6) { color: var(--ot); }
+#ps-goalies-table td:nth-child(7) { color: var(--gold); }
+
+/* Player name hyperlinks in stats tables */
+.ps-player-link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(255,255,255,0.25);
+  transition: color 0.12s, text-decoration-color 0.12s;
+}
+.ps-player-link:hover { color: var(--gold); text-decoration-color: var(--gold); }
+.ps-player-link.ps-link-loading { opacity: 0.55; cursor: wait; }
+
+/* Goalie table sort */
+#ps-goalies-table thead th.sortable { cursor: pointer; }
+#ps-goalies-table thead th.ps-sort-active { color: var(--gold); }
+
+/* Stars badge */
+.ps-stars-badge {
+  display: inline-block;
+  background: rgba(255,184,28,0.12);
+  color: var(--gold);
+  font-family: var(--font-d);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 4px;
+}
+
+/* Multi-team expand rows */
+.ps-multi-row { cursor: pointer; }
+.ps-multi-row:hover td { background: var(--surface2); }
+.ps-expand-icon {
+  font-size: 0.65rem;
+  margin-right: 0.4rem;
+  display: inline-block;
+  transition: transform 0.15s;
+  color: var(--text-dim);
+}
+.ps-multi-row.ps-expanded .ps-expand-icon { transform: rotate(90deg); }
+.ps-sub-row td {
+  background: rgba(255,255,255,0.018);
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  font-size: 0.87rem;
+}
+.ps-sub-row:hover td { background: var(--surface2); }
+.ps-sub-row td:first-child { padding-left: 2rem; color: var(--text-dim); }
 
 /* ── Scoring row team logo + score snapshot ── */
 .score-team-logo { display:inline-flex; align-items:center; flex-shrink:0; margin-top:1px; }

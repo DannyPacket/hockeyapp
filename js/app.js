@@ -101,6 +101,45 @@ const NHL_GAME_ID_MAP = {
   "2026-04-28|BUF":"2025030116",
 };
 
+// ── NHL ARENA LOCATIONS ───────────────────────────────────────
+const NHL_ARENAS = [
+  { abbr:"ANA", team:"Anaheim Ducks",         arena:"Honda Center",             lat:33.8078,  lng:-117.8765 },
+  { abbr:"BOS", team:"Boston Bruins",          arena:"TD Garden",                lat:42.3662,  lng:-71.0621  },
+  { abbr:"BUF", team:"Buffalo Sabres",         arena:"KeyBank Center",           lat:42.8750,  lng:-78.8764  },
+  { abbr:"CGY", team:"Calgary Flames",         arena:"Scotiabank Saddledome",    lat:51.0374,  lng:-114.0519 },
+  { abbr:"CAR", team:"Carolina Hurricanes",    arena:"PNC Arena",                lat:35.8033,  lng:-78.7217  },
+  { abbr:"CHI", team:"Chicago Blackhawks",     arena:"United Center",            lat:41.8807,  lng:-87.6742  },
+  { abbr:"COL", team:"Colorado Avalanche",     arena:"Ball Arena",               lat:39.7486,  lng:-105.0077 },
+  { abbr:"CBJ", team:"Columbus Blue Jackets",  arena:"Nationwide Arena",         lat:39.9690,  lng:-83.0061  },
+  { abbr:"DAL", team:"Dallas Stars",           arena:"American Airlines Center", lat:32.7905,  lng:-96.8103  },
+  { abbr:"DET", team:"Detroit Red Wings",      arena:"Little Caesars Arena",     lat:42.3411,  lng:-83.0548  },
+  { abbr:"EDM", team:"Edmonton Oilers",        arena:"Rogers Place",             lat:53.5469,  lng:-113.4977 },
+  { abbr:"FLA", team:"Florida Panthers",       arena:"Amerant Bank Arena",       lat:26.1584,  lng:-80.3256  },
+  { abbr:"LAK", team:"Los Angeles Kings",      arena:"Crypto.com Arena",         lat:34.0430,  lng:-118.2673 },
+  { abbr:"MIN", team:"Minnesota Wild",         arena:"Xcel Energy Center",       lat:44.9447,  lng:-93.1013  },
+  { abbr:"MTL", team:"Montreal Canadiens",     arena:"Bell Centre",              lat:45.4961,  lng:-73.5694  },
+  { abbr:"NSH", team:"Nashville Predators",    arena:"Bridgestone Arena",        lat:36.1591,  lng:-86.7785  },
+  { abbr:"NJD", team:"New Jersey Devils",      arena:"Prudential Center",        lat:40.7334,  lng:-74.1712,  wiki:"Prudential_Center"              },
+  { abbr:"NYI", team:"New York Islanders",     arena:"UBS Arena",                lat:40.7219,  lng:-73.7230  },
+  { abbr:"NYR", team:"New York Rangers",       arena:"Madison Square Garden",    lat:40.7505,  lng:-73.9934  },
+  { abbr:"OTT", team:"Ottawa Senators",        arena:"Canadian Tire Centre",     lat:45.2967,  lng:-75.9280  },
+  { abbr:"PHI", team:"Philadelphia Flyers",    arena:"Xfinity Mobile Arena",     lat:39.9012,  lng:-75.1720,  wiki:"Wells_Fargo_Center_(Philadelphia)" },
+  { abbr:"PIT", team:"Pittsburgh Penguins",    arena:"PPG Paints Arena",         lat:40.4395,  lng:-79.9893  },
+  { abbr:"SJS", team:"San Jose Sharks",        arena:"SAP Center",               lat:37.3327,  lng:-121.9008 },
+  { abbr:"SEA", team:"Seattle Kraken",         arena:"Climate Pledge Arena",     lat:47.6222,  lng:-122.3542 },
+  { abbr:"STL", team:"St. Louis Blues",        arena:"Enterprise Center",        lat:38.6267,  lng:-90.2025,  wiki:"Enterprise_Center"              },
+  { abbr:"TBL", team:"Tampa Bay Lightning",    arena:"Amalie Arena",             lat:27.9428,  lng:-82.4519  },
+  { abbr:"TOR", team:"Toronto Maple Leafs",    arena:"Scotiabank Arena",         lat:43.6435,  lng:-79.3791  },
+  { abbr:"UTA", team:"Utah Mammoth",            arena:"Delta Center",             lat:40.7683,  lng:-111.9011, wiki:"Delta_Center"                   },
+  { abbr:"VAN", team:"Vancouver Canucks",      arena:"Rogers Arena",             lat:49.2778,  lng:-123.1088 },
+  { abbr:"VGK", team:"Vegas Golden Knights",   arena:"T-Mobile Arena",           lat:36.1028,  lng:-115.1781 },
+  { abbr:"WSH", team:"Washington Capitals",    arena:"Capital One Arena",        lat:38.8981,  lng:-77.0209  },
+  { abbr:"WPG", team:"Winnipeg Jets",          arena:"Canada Life Centre",       lat:49.8928,  lng:-97.1434  },
+];
+
+const ABBR_TO_TEAM = Object.fromEntries(NHL_ARENAS.map(a => [a.abbr, a.team]));
+function teamFullName(abbr) { return ABBR_TO_TEAM[abbr?.toUpperCase()] || abbr || "Unknown"; }
+
 const OPP_TO_ABBR = {
   "Buffalo":"BUF","Buffalo Sabres":"BUF","Toronto":"TOR","Toronto Maple Leafs":"TOR",
   "Montreal":"MTL","Montreal Canadiens":"MTL","Ottawa":"OTT","Ottawa Senators":"OTT",
@@ -136,7 +175,8 @@ function gamecenterUrl(g, gameId) {
 
 // ── STATE ─────────────────────────────────────────────────────
 let ALL_GAMES = [];
-let activeFilters = { homeAway: "All", seasonType: "All" };
+let activeFilters = { homeAway: "All", seasonType: "All", season: [] };
+let seasonDropdownOpen = false;
 
 const SORT = {
   opp:    { col: "gp",     dir: "desc" },
@@ -152,6 +192,25 @@ let expandGdWin  = null;  // gd wins index
 let expandGdLoss = null;  // gd losses index
 let expandGl     = null;  // game log row index
 let expandSp     = null;  // special events row index
+
+let mapInstance   = null;
+let mapMarkers    = [];
+let markersByAbbr = {};
+let mapAutoOpened = false;
+let selectedArena = null;
+let expandMapGl   = null;
+
+let playerStatsFetched  = false;
+let playerStatsLoading  = false;
+let psPosition          = "skater"; // "skater" | "goalie"
+let psFilter            = "all";    // "all" | "bos" | "opp" (preset; ignored when psTeamFilter non-empty)
+let psTeamFilter        = new Set(); // specific team abbrs; empty = use psFilter preset
+let psDropdownBuilt     = false;
+let psSortCol           = "pts";
+let psSortDir           = "desc";
+let psGoalieSortCol     = "w";
+let psGoalieSortDir     = "desc";
+let psExpanded          = new Set(); // set of player names that are expanded (multi-team)
 
 const nhlCache    = {};  // unused — kept for compat
 const gameIdCache = {};  // unused — kept for compat
@@ -177,6 +236,13 @@ function setupTabs() {
       document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
       btn.classList.add("active");
       document.getElementById(btn.dataset.tab).classList.add("active");
+      if (btn.dataset.tab === "tab-map") {
+        renderMap(filteredGames(false));
+        if (mapInstance) setTimeout(() => mapInstance.invalidateSize(), 50);
+      }
+      if (btn.dataset.tab === "tab-playerstats") {
+        renderPlayerStats(filteredGames(false));
+      }
     });
   });
 }
@@ -193,6 +259,38 @@ function setupFilterDelegation() {
     document.querySelectorAll(`.pill[data-group="${group}"]`).forEach(p => p.classList.remove("active"));
     pill.classList.add("active");
     activeFilters[group] = val;
+    if (group === "homeAway" || group === "seasonType") {
+      const avail = availableSeasons();
+      activeFilters.season = activeFilters.season.filter(s => avail.includes(s));
+    }
+    renderAll();
+  });
+
+  // Season dropdown toggle + outside-click close
+  document.addEventListener("click", e => {
+    if (e.target.closest(".season-dd-trigger")) {
+      seasonDropdownOpen = !seasonDropdownOpen;
+      renderAll();
+      return;
+    }
+    if (!e.target.closest(".season-dd-wrap") && seasonDropdownOpen) {
+      seasonDropdownOpen = false;
+      renderAll();
+    }
+  });
+
+  // Season checkbox change
+  document.addEventListener("change", e => {
+    const cb = e.target.closest(".season-dd-check");
+    if (!cb) return;
+    const val = cb.value;
+    if (val === "__all__") {
+      activeFilters.season = [];
+    } else {
+      const idx = activeFilters.season.indexOf(val);
+      if (idx === -1) activeFilters.season.push(val);
+      else            activeFilters.season.splice(idx, 1);
+    }
     renderAll();
   });
 }
@@ -254,15 +352,34 @@ function filteredGames(includeSpecial = false) {
     if (!includeSpecial) {
       if (activeFilters.homeAway   !== "All" && g.homeAway   !== activeFilters.homeAway)   return false;
       if (activeFilters.seasonType !== "All" && g.seasonType !== activeFilters.seasonType) return false;
+      if (activeFilters.season.length > 0 && !activeFilters.season.includes(g.season))    return false;
     }
     return true;
   });
 }
 
+function uniqueSeasons() {
+  const s = new Set(ALL_GAMES.filter(g => g.season).map(g => g.season));
+  return [...s].sort((a, b) => b.localeCompare(a));
+}
+
+function availableSeasons() {
+  const s = new Set(
+    ALL_GAMES.filter(g => {
+      if (g.seasonType.toLowerCase() === "special") return false;
+      if (activeFilters.homeAway   !== "All" && g.homeAway   !== activeFilters.homeAway)   return false;
+      if (activeFilters.seasonType !== "All" && g.seasonType !== activeFilters.seasonType) return false;
+      return !!g.season;
+    }).map(g => g.season)
+  );
+  return [...s].sort((a, b) => b.localeCompare(a));
+}
+
 
 function navigateToGameLog(isoDate) {
   // Reset filters so the target game is always visible
-  activeFilters = { homeAway: "All", seasonType: "All" };
+  activeFilters = { homeAway: "All", seasonType: "All", season: [] };
+  seasonDropdownOpen = false;
   document.querySelectorAll(".pill[data-group]").forEach(p => {
     p.classList.toggle("active", p.dataset.filter === "All");
   });
@@ -295,9 +412,11 @@ function renderAll() {
   renderGameLog(games);
   renderOpponents(games);
   renderGoalDiff(games);
+  renderMap(games);
   renderAttendees(games);
   renderSeasons(games);
   renderSpecial(special);
+  if (playerStatsFetched) renderPlayerStats(games);
 }
 
 // ── HELPERS ───────────────────────────────────────────────────
@@ -322,11 +441,31 @@ const extractSeason = s => { if (!s) return "Unknown"; const d = new Date(s), y 
 
 function filterPillsHTML() {
   const ha = activeFilters.homeAway, st = activeFilters.seasonType;
+  const sel = activeFilters.season;
+  const seasons = availableSeasons();
+  const label = sel.length === 0 ? "All Seasons"
+    : sel.length === 1 ? sel[0]
+    : `${sel.length} Seasons`;
+  const allItem = `<label class="season-dd-item season-dd-all">
+      <input type="checkbox" class="season-dd-check" value="__all__"${sel.length === 0 ? " checked" : ""}>
+      <span>All Seasons</span>
+    </label><div class="season-dd-divider"></div>`;
+  const items = seasons.map(s =>
+    `<label class="season-dd-item">
+      <input type="checkbox" class="season-dd-check" value="${s}"${sel.includes(s) ? " checked" : ""}>
+      <span>${s}</span>
+    </label>`
+  ).join("");
   return `<div class="filters">
     <span class="filter-label">Location:</span>
     ${["All","Home","Away"].map(v => `<button class="pill${ha===v?" active":""}" data-filter="${v}" data-group="homeAway">${v}</button>`).join("")}
     <span class="filter-label" style="margin-left:1rem">Game Type:</span>
     ${["All","Regular","Playoffs","Preseason"].map(v => `<button class="pill${st===v?" active":""}" data-filter="${v}" data-group="seasonType">${v}</button>`).join("")}
+    <span class="filter-label" style="margin-left:1rem">Season:</span>
+    <div class="season-dd-wrap${seasonDropdownOpen ? " dd-open" : ""}">
+      <button class="pill season-dd-trigger${sel.length > 0 ? " active" : ""}">${label} <span class="chevron">▾</span></button>
+      <div class="season-dd-panel${seasonDropdownOpen ? " open" : ""}">${allItem}${items}</div>
+    </div>
   </div>`;
 }
 
@@ -600,6 +739,7 @@ function subExpandHTML(games, colspan, opts) {
 
 // ── OVERVIEW ──────────────────────────────────────────────────
 function renderOverview(games) {
+  document.getElementById("ov-filters").innerHTML = filterPillsHTML();
   const rec = record(games);
   const gf  = totalGoals(games,"goalsFor"), ga = totalGoals(games,"goalsAgainst"), gd = gf-ga;
 
@@ -735,22 +875,53 @@ function renderOpponents(games) {
   attachSortListeners();
 }
 
+function computeStreaks(games) {
+  const sorted = [...games].sort((a, b) => new Date(a.date) - new Date(b.date));
+  let longestW = 0, longestL = 0, curW = 0, curL = 0;
+  for (const g of sorted) {
+    if (g.result === "W") {
+      curW++; curL = 0;
+      if (curW > longestW) longestW = curW;
+    } else {
+      curL++; curW = 0;
+      if (curL > longestL) longestL = curL;
+    }
+  }
+  // Current streak: walk backwards from most recent
+  let curType = null, curCount = 0;
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const isW = sorted[i].result === "W";
+    if (curType === null) { curType = isW ? "W" : "L"; curCount = 1; }
+    else if ((curType === "W") === isW) curCount++;
+    else break;
+  }
+  return {
+    longestW,
+    longestL,
+    current: sorted.length ? `${curType}${curCount}` : "—",
+  };
+}
+
 // ── GOAL DIFFERENTIAL ─────────────────────────────────────────
 function renderGoalDiff(games) {
   document.getElementById("gd-filters").innerHTML = filterPillsHTML();
 
   const gds = games.map(g=>g.goalsFor-g.goalsAgainst);
   const avg = gds.length ? gds.reduce((a,b)=>a+b,0)/gds.length : 0;
+  const streaks = computeStreaks(games);
 
-  document.getElementById("gd-avg").textContent      = avg>=0 ? `+${avg.toFixed(2)}` : avg.toFixed(2);
-  document.getElementById("gd-max").textContent      = gds.length ? `+${Math.max(...gds)}` : "—";
-  document.getElementById("gd-min").textContent      = gds.length ? Math.min(...gds) : "—";
-  document.getElementById("gd-positive").textContent = gds.filter(d=>d>0).length;
-  document.getElementById("gd-negative").textContent = gds.filter(d=>d<0).length;
-  document.getElementById("gd-one-win").textContent  = games.filter(g=>Math.abs(g.goalsFor-g.goalsAgainst)===1&&g.result==="W").length;
-  document.getElementById("gd-one-loss").textContent = games.filter(g=>Math.abs(g.goalsFor-g.goalsAgainst)===1&&isLoss(g.result)).length;
+  document.getElementById("gd-avg").textContent       = avg>=0 ? `+${avg.toFixed(2)}` : avg.toFixed(2);
+  document.getElementById("gd-max").textContent       = gds.length ? `+${Math.max(...gds)}` : "—";
+  document.getElementById("gd-min").textContent       = gds.length ? Math.min(...gds) : "—";
+  document.getElementById("gd-positive").textContent  = gds.filter(d=>d>0).length;
+  document.getElementById("gd-negative").textContent  = gds.filter(d=>d<0).length;
+  document.getElementById("gd-one-win").textContent   = games.filter(g=>Math.abs(g.goalsFor-g.goalsAgainst)===1&&g.result==="W").length;
+  document.getElementById("gd-one-loss").textContent  = games.filter(g=>Math.abs(g.goalsFor-g.goalsAgainst)===1&&isLoss(g.result)).length;
+  document.getElementById("gd-streak-w").textContent  = streaks.longestW || "—";
+  document.getElementById("gd-streak-l").textContent  = streaks.longestL || "—";
+  document.getElementById("gd-streak-cur").textContent = streaks.current;
 
-  renderGDChart(gds);
+  renderGDChart(games);
 
   const wins   = [...games].filter(g=>g.result==="W").sort((a,b)=>(b.goalsFor-b.goalsAgainst)-(a.goalsFor-a.goalsAgainst)).slice(0,5);
   const losses = [...games].filter(g=>isLoss(g.result)).sort((a,b)=>(a.goalsFor-a.goalsAgainst)-(b.goalsFor-b.goalsAgainst)).slice(0,5);
@@ -782,25 +953,79 @@ function renderGoalDiff(games) {
   if (expandGdLoss !== null && expandGdLoss < losses.length) loadNhlDetailForGame(losses[expandGdLoss], `gdl-${expandGdLoss}`);
 }
 
-function renderGDChart(gds) {
+function renderGDChart(games) {
   const ctx = document.getElementById("gd-chart");
   if (!ctx) return;
   if (ctx._chartInstance) ctx._chartInstance.destroy();
-  if (!gds.length) return;
-  const counts = {};
-  gds.forEach(d => { counts[d] = (counts[d]||0)+1; });
-  const mn = Math.min(...gds,-1), mx = Math.max(...gds,1);
-  const labels=[],data=[],colors=[];
-  for (let i=mn;i<=mx;i++) {
-    labels.push(i>=0?`+${i}`:`${i}`);
-    data.push(counts[i]||0);
-    colors.push(i>0?"rgba(76,175,125,0.7)":i<0?"rgba(224,82,82,0.7)":"rgba(255,184,28,0.7)");
-  }
+  if (!games.length) return;
+
+  const sorted = [...games].sort((a, b) => new Date(a.date) - new Date(b.date));
+  let cumGF = 0, cumGA = 0;
+  const labels = [], dataGF = [], dataGA = [];
+  sorted.forEach((g, i) => {
+    cumGF += g.goalsFor;
+    cumGA += g.goalsAgainst;
+    labels.push(fmtDate(g.date));
+    dataGF.push(cumGF);
+    dataGA.push(cumGA);
+  });
+
+  const gridColor = "rgba(255,255,255,0.05)";
+  const tickColor = "#888";
   ctx._chartInstance = new Chart(ctx, {
-    type:"bar",
-    data:{ labels, datasets:[{ data, backgroundColor:colors, borderRadius:4 }] },
-    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } },
-      scales:{ x:{ ticks:{color:"#888"}, grid:{color:"rgba(255,255,255,0.05)"} }, y:{ ticks:{color:"#888",stepSize:1}, grid:{color:"rgba(255,255,255,0.05)"} } } },
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Goals For",
+          data: dataGF,
+          borderColor: "rgba(255,184,28,0.9)",
+          backgroundColor: "rgba(255,184,28,0.08)",
+          fill: true,
+          tension: 0.3,
+          pointRadius: sorted.length > 30 ? 0 : 3,
+          pointHoverRadius: 5,
+          borderWidth: 2,
+        },
+        {
+          label: "Goals Against",
+          data: dataGA,
+          borderColor: "rgba(122,173,255,0.75)",
+          backgroundColor: "rgba(122,173,255,0.06)",
+          fill: true,
+          tension: 0.3,
+          pointRadius: sorted.length > 30 ? 0 : 3,
+          pointHoverRadius: 5,
+          borderWidth: 2,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: "#aaa", boxWidth: 12, font: { size: 11 } },
+        },
+        tooltip: {
+          callbacks: {
+            afterBody: items => {
+              const gf = items.find(i => i.dataset.label === "Goals For")?.parsed.y ?? 0;
+              const ga = items.find(i => i.dataset.label === "Goals Against")?.parsed.y ?? 0;
+              const diff = gf - ga;
+              return [`Differential: ${diff >= 0 ? "+" : ""}${diff}`];
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: tickColor, maxTicksLimit: 10, maxRotation: 30 }, grid: { color: gridColor } },
+        y: { ticks: { color: tickColor }, grid: { color: gridColor }, beginAtZero: true },
+      },
+    },
   });
 }
 
@@ -974,6 +1199,725 @@ function renderSpecial(games) {
 
   if (expandSp !== null && expandSp < sorted.length) {
     loadNhlDetailForGame(sorted[expandSp], `sp-panel-${expandSp}`);
+  }
+}
+
+// ── MAP ───────────────────────────────────────────────────────
+function visitedArenaMap(games) {
+  const map = {};
+  games.forEach(g => {
+    const abbr = g.homeAway === "Home" ? "BOS" : (OPP_TO_ABBR[g.opponent] || null);
+    if (!abbr) return;
+    (map[abbr] = map[abbr] || []).push(g);
+  });
+  return map;
+}
+
+function createLogoIcon(abbr, visited, selected) {
+  const src = `https://assets.nhle.com/logos/nhl/svg/${abbr}_light.svg`;
+  const fb  = `https://a.espncdn.com/combiner/i?img=/i/teamlogos/nhl/500/${abbr.toLowerCase()}.png&h=40&w=40`;
+  let cls   = "arena-logo-marker";
+  if (!visited && !selected) cls += " arena-logo-dim";
+  if (selected)              cls += " arena-logo-selected";
+  return L.divIcon({
+    className: "logo-icon-wrap",
+    html: `<div class="${cls}"><img src="${src}" alt="${abbr}" onerror="this.src='${fb}';this.onerror=function(){this.style.display='none'}"></div>`,
+    iconSize:     [38, 38],
+    iconAnchor:   [19, 19],
+    tooltipAnchor:[0, -22],
+    popupAnchor:  [0, -22],
+  });
+}
+
+function gamesAtArena(games, abbr) {
+  return games.filter(g => {
+    const ga = g.homeAway === "Home" ? "BOS" : (OPP_TO_ABBR[g.opponent] || null);
+    return ga === abbr;
+  });
+}
+
+// ── PLAYER STATS ──────────────────────────────────────────────
+
+function aggregatePlayerStats(games) {
+  const byPlayer = {}; // name → { perTeam: { abbr → {g,a,pts,gp:Set,stars} } }
+
+  const addContrib = (name, abbr, type, dateStr) => {
+    if (!name || !abbr) return;
+    if (!byPlayer[name]) byPlayer[name] = { perTeam: {} };
+    if (!byPlayer[name].perTeam[abbr]) byPlayer[name].perTeam[abbr] = { g: 0, a: 0, pts: 0, gp: new Set(), stars: 0, star1: 0, star2: 0, star3: 0 };
+    const e = byPlayer[name].perTeam[abbr];
+    e.gp.add(dateStr);
+    if (type === "g") { e.g++; e.pts++; }
+    else              { e.a++; e.pts++; }
+  };
+
+  for (const g of games) {
+    const dateStr = normaliseDateStr(g.date);
+    const cached  = espnCache[dateStr];
+    if (!cached) continue;
+    for (const play of (cached.scoringPlays || [])) {
+      const abbr = (play.team || "").toUpperCase();
+      addContrib(play.scorer, abbr, "g", dateStr);
+      (play.assists || []).forEach(n => addContrib(n, abbr, "a", dateStr));
+    }
+    for (const st of (cached.stars || [])) {
+      if (!st?.name) continue;
+      const abbr = (st.team || "").toUpperCase();
+      if (!byPlayer[st.name]) byPlayer[st.name] = { perTeam: {} };
+      if (!byPlayer[st.name].perTeam[abbr]) byPlayer[st.name].perTeam[abbr] = { g: 0, a: 0, pts: 0, gp: new Set(), stars: 0, star1: 0, star2: 0, star3: 0 };
+      const se = byPlayer[st.name].perTeam[abbr];
+      se.stars++;
+      if (st.order === 1) se.star1++;
+      else if (st.order === 2) se.star2++;
+      else if (st.order === 3) se.star3++;
+    }
+  }
+
+  return Object.entries(byPlayer).map(([name, data]) => {
+    const teams = Object.keys(data.perTeam);
+    const isMulti = teams.length > 1;
+    let g = 0, a = 0, pts = 0, stars = 0, star1 = 0, star2 = 0, star3 = 0;
+    const allGP = new Set();
+    for (const e of Object.values(data.perTeam)) {
+      g += e.g; a += e.a; pts += e.pts; stars += e.stars;
+      star1 += e.star1; star2 += e.star2; star3 += e.star3;
+      e.gp.forEach(d => allGP.add(d));
+    }
+    return {
+      name, isMulti,
+      abbr: isMulti ? "NHL" : (teams[0] || ""),
+      g, a, pts, stars, star1, star2, star3, gp: allGP.size,
+      perTeam: teams.map(abbr => {
+        const e = data.perTeam[abbr];
+        return { abbr, g: e.g, a: e.a, pts: e.pts, stars: e.stars, star1: e.star1, star2: e.star2, star3: e.star3, gp: e.gp.size };
+      }).sort((x, y) => y.pts - x.pts),
+    };
+  });
+}
+
+function aggregateGoalieStats(games) {
+  // byGoalie: name → { perTeam: { abbr → { w,l,otl,so,pts,stars,gp } } }
+  const byGoalie = {};
+
+  const getEntry = (name, abbr) => {
+    if (!byGoalie[name]) byGoalie[name] = { perTeam: {} };
+    if (!byGoalie[name].perTeam[abbr]) byGoalie[name].perTeam[abbr] = { w: 0, l: 0, otl: 0, so: 0, pts: 0, stars: 0, star1: 0, star2: 0, star3: 0, gp: 0 };
+    return byGoalie[name].perTeam[abbr];
+  };
+
+  // Pass 1: decision goalies
+  for (const g of games) {
+    const dateStr = normaliseDateStr(g.date);
+    const cached  = espnCache[dateStr];
+    if (!cached?.goalies?.length) continue;
+    const wentOT = (cached.periods || []).some(p => /OT|SO/i.test(p.label));
+    for (const gl of cached.goalies) {
+      if (!gl.name || !gl.decision) continue;
+      const abbr = (gl.team || "").toUpperCase();
+      const e = getEntry(gl.name, abbr);
+      e.gp++;
+      if (gl.decision === "W") {
+        e.w++;
+      } else {
+        const bosLostOT = abbr === "BOS" && g.result === "OTL";
+        const oppLostOT = abbr !== "BOS" && g.result === "W" && wentOT;
+        (bosLostOT || oppLostOT) ? e.otl++ : e.l++;
+      }
+      if (gl.goalsAgainst === 0) e.so++;
+    }
+  }
+
+  // Pass 2: star appearances (pos="G" or already known goalie)
+  for (const g of games) {
+    const dateStr = normaliseDateStr(g.date);
+    const cached  = espnCache[dateStr];
+    if (!cached) continue;
+    for (const st of (cached.stars || [])) {
+      if (!st?.name) continue;
+      const isKnown   = !!byGoalie[st.name];
+      const posGoalie = (st.pos || "").toUpperCase() === "G";
+      if (!isKnown && !posGoalie) continue;
+      const ge = getEntry(st.name, (st.team || "").toUpperCase());
+      ge.stars++;
+      if (st.order === 1) ge.star1++;
+      else if (st.order === 2) ge.star2++;
+      else if (st.order === 3) ge.star3++;
+    }
+  }
+
+  // Pass 3: goalie points from scoring plays
+  const goalieNames = new Set(Object.keys(byGoalie));
+  for (const g of games) {
+    const dateStr = normaliseDateStr(g.date);
+    const cached  = espnCache[dateStr];
+    if (!cached) continue;
+    for (const play of (cached.scoringPlays || [])) {
+      const abbr = (play.team || "").toUpperCase();
+      if (goalieNames.has(play.scorer))                          getEntry(play.scorer, abbr).pts++;
+      (play.assists || []).forEach(n => { if (goalieNames.has(n)) getEntry(n, abbr).pts++; });
+    }
+  }
+
+  // Flatten — aggregate totals + per-team breakdown
+  return Object.entries(byGoalie).map(([name, data]) => {
+    const teams   = Object.keys(data.perTeam);
+    const isMulti = teams.length > 1;
+    let w = 0, l = 0, otl = 0, so = 0, pts = 0, stars = 0, star1 = 0, star2 = 0, star3 = 0, gp = 0;
+    for (const e of Object.values(data.perTeam)) {
+      w += e.w; l += e.l; otl += e.otl; so += e.so; pts += e.pts;
+      stars += e.stars; star1 += e.star1; star2 += e.star2; star3 += e.star3; gp += e.gp;
+    }
+    return {
+      name, isMulti,
+      team: isMulti ? "NHL" : (teams[0] || ""),
+      w, l, otl, so, pts, stars, star1, star2, star3, gp,
+      perTeam: teams.map(abbr => ({ abbr, ...data.perTeam[abbr] })).sort((a, b) => b.w - a.w),
+    };
+  }).sort((a, b) => b.w - a.w || b.gp - a.gp);
+}
+
+function makePlayerLink(name) {
+  return `<span class="ps-player-link" data-pname="${encodeURIComponent(name)}">${name}</span>`;
+}
+
+function teamLogoByAbbr(abbr) {
+  if (!abbr || abbr === "NHL") {
+    // NHL league logo
+    return `<img src="https://assets.nhle.com/logos/nhl/svg/NHL_light.svg" alt="NHL" class="team-logo" onerror="this.style.display='none'">`;
+  }
+  const a = abbr.toLowerCase();
+  const src = `https://assets.nhle.com/logos/nhl/svg/${abbr.toUpperCase()}_light.svg`;
+  const fb  = `https://a.espncdn.com/combiner/i?img=/i/teamlogos/nhl/500/${a}.png&h=40&w=40`;
+  return `<img src="${src}" alt="${abbr}" class="team-logo" onerror="this.src='${fb}';this.onerror=function(){this.style.display='none'}">`;
+}
+
+function projectPlayer(player) {
+  let teams;
+  if (psTeamFilter.size > 0) {
+    teams = player.perTeam.filter(t => psTeamFilter.has(t.abbr));
+  } else if (psFilter === "bos") {
+    teams = player.perTeam.filter(t => t.abbr === "BOS");
+  } else if (psFilter === "opp") {
+    teams = player.perTeam.filter(t => t.abbr !== "BOS");
+  } else {
+    return player;
+  }
+  if (teams.length === 0) return null;
+  let g = 0, a = 0, pts = 0, stars = 0, star1 = 0, star2 = 0, star3 = 0, gp = 0;
+  for (const t of teams) {
+    g += t.g; a += t.a; pts += t.pts; stars += t.stars;
+    star1 += t.star1; star2 += t.star2; star3 += t.star3; gp += t.gp;
+  }
+  return { ...player, abbr: teams.length === 1 ? teams[0].abbr : "NHL", isMulti: teams.length > 1, g, a, pts, stars, star1, star2, star3, gp, perTeam: teams };
+}
+
+function projectGoalie(goalie) {
+  let teams;
+  if (psTeamFilter.size > 0) {
+    teams = goalie.perTeam.filter(t => psTeamFilter.has(t.abbr));
+  } else if (psFilter === "bos") {
+    teams = goalie.perTeam.filter(t => t.abbr === "BOS");
+  } else if (psFilter === "opp") {
+    teams = goalie.perTeam.filter(t => t.abbr !== "BOS");
+  } else {
+    return goalie;
+  }
+  if (teams.length === 0) return null;
+  let w = 0, l = 0, otl = 0, so = 0, pts = 0, stars = 0, star1 = 0, star2 = 0, star3 = 0, gp = 0;
+  for (const t of teams) {
+    w += t.w; l += t.l; otl += t.otl; so += t.so; pts += t.pts;
+    stars += t.stars; star1 += t.star1; star2 += t.star2; star3 += t.star3; gp += t.gp;
+  }
+  return { ...goalie, team: teams.length === 1 ? teams[0].abbr : "NHL", isMulti: teams.length > 1, w, l, otl, so, pts, stars, star1, star2, star3, gp, perTeam: teams };
+}
+
+function updatePsTeamLabel() {
+  const el = document.getElementById("ps-team-label");
+  if (!el) return;
+  if (psTeamFilter.size === 0) {
+    el.textContent = psFilter === "bos" ? "Bruins Only" : psFilter === "opp" ? "Opponents Only" : "All Teams";
+  } else if (psTeamFilter.size === 1) {
+    const abbr  = [...psTeamFilter][0];
+    const arena = NHL_ARENAS.find(a => a.abbr === abbr);
+    el.textContent = arena ? arena.team : abbr;
+  } else {
+    el.textContent = `${psTeamFilter.size} Teams`;
+  }
+}
+
+function setupPsTeamDropdown() {
+  if (psDropdownBuilt) return;
+  psDropdownBuilt = true;
+  const panel = document.getElementById("ps-team-panel");
+  if (!panel) return;
+  const teams = [...NHL_ARENAS].sort((a, b) => a.team.localeCompare(b.team));
+  panel.innerHTML = `
+    <div class="ps-dd-presets">
+      <button class="pill active" data-ps-preset="all">All Players</button>
+      <button class="pill" data-ps-preset="bos">Bruins Only</button>
+      <button class="pill" data-ps-preset="opp">Opponents Only</button>
+    </div>
+    <div class="season-dd-divider"></div>
+    <div class="ps-dd-team-list">
+      ${teams.map(t => `<label class="season-dd-item">
+        <input type="checkbox" value="${t.abbr}" class="ps-team-check">
+        ${teamLogoByAbbr(t.abbr)}<span>${t.team}</span>
+      </label>`).join("")}
+    </div>`;
+}
+
+function renderPlayerStatsTable(games) {
+  const allSkaters = aggregatePlayerStats(games);
+  const goalies    = aggregateGoalieStats(games);
+
+  // Show only the active position table full-width; hide the other
+  const grid = document.querySelector(".ps-tables-grid");
+  const [skaterDiv, goalieDiv] = grid ? [...grid.children] : [null, null];
+  if (grid) {
+    if (psPosition === "skater") {
+      grid.classList.add("ps-single-col");
+      if (skaterDiv) skaterDiv.style.display = "";
+      if (goalieDiv) goalieDiv.style.display = "none";
+    } else {
+      grid.classList.add("ps-single-col");
+      if (skaterDiv) skaterDiv.style.display = "none";
+      if (goalieDiv) goalieDiv.style.display = "";
+    }
+  }
+
+  updatePsTeamLabel();
+  const filtered        = allSkaters.map(p => projectPlayer(p)).filter(Boolean);
+  const filteredGoalies = goalies.map(gl => projectGoalie(gl)).filter(Boolean);
+
+  const sortVal = p => {
+    if (psSortCol === "name") return p.name.toLowerCase();
+    return p[psSortCol] ?? 0;
+  };
+  const sorted = [...filtered].sort((a, b) => {
+    const av = sortVal(a), bv = sortVal(b);
+    const cmp = typeof av === "string" ? av.localeCompare(bv) : bv - av;
+    return psSortDir === "asc" ? -cmp : cmp;
+  });
+
+  // Stat cards — reflect active filters
+  const gamesWithData = games.filter(g => {
+    if (!espnCache[normaliseDateStr(g.date)]) return false;
+    if (psTeamFilter.size === 0) return true;
+    const oppAbbr = (OPP_TO_ABBR[g.opponent] || g.opponent || "").toUpperCase();
+    return psTeamFilter.has(oppAbbr) || psTeamFilter.has("BOS");
+  }).length;
+  const shutoutsTracked = filteredGoalies.reduce((s, gl) => s + (gl.so || 0), 0);
+  document.getElementById("ps-games-loaded").textContent   = gamesWithData;
+  document.getElementById("ps-total-players").textContent  = filtered.length;
+  document.getElementById("ps-total-goals").textContent    = filtered.reduce((s, p) => s + p.g, 0);
+  document.getElementById("ps-total-goalies").textContent  = filteredGoalies.length;
+  document.getElementById("ps-total-shutouts").textContent = shutoutsTracked;
+  document.getElementById("ps-loaded-content").style.display = "";
+
+  // Skater table header
+  const colLabels = { gp: "GP", g: "G", a: "A", pts: "PTS", stars: "★", star1: "1st", star2: "2nd", star3: "3rd" };
+  document.querySelector("#ps-skaters-table thead tr").innerHTML = `
+    <th class="sortable ps-sort-th${psSortCol==="name"?" ps-sort-active":""}" data-ps-col="name">
+      Player${psSortCol==="name"?(psSortDir==="asc"?" ↑":" ↓"):""}
+    </th>
+    <th>Team</th>
+    ${["gp","g","a","pts","stars","star1","star2","star3"].map(c =>
+      `<th class="sortable ps-sort-th${psSortCol===c?" ps-sort-active":""}" data-ps-col="${c}">${colLabels[c]}${psSortCol===c?(psSortDir==="asc"?" ↑":" ↓"):""}</th>`
+    ).join("")}`;
+
+  // Skater table rows
+  const rows = [];
+  for (const p of sorted) {
+    const isExp  = psExpanded.has(p.name);
+    const teamCell = p.isMulti
+      ? `${teamLogoByAbbr("NHL")}<span class="dim">MULTI</span>`
+      : `${teamLogoByAbbr(p.abbr)}<span class="dim">${p.abbr || "—"}</span>`;
+    const expandIcon = p.isMulti ? `<span class="ps-expand-icon">▶</span>` : `<span style="display:inline-block;width:1rem"></span>`;
+    rows.push(`<tr class="${p.isMulti ? `ps-multi-row${isExp?" ps-expanded":""}` : ""}" data-ps-player="${encodeURIComponent(p.name)}">
+      <td>${expandIcon}<strong>${makePlayerLink(p.name)}</strong></td>
+      <td>${teamCell}</td>
+      <td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td>
+      <td>${p.pts}</td>
+      <td>${p.stars ? `<span class="ps-stars-badge">★ ${p.stars}</span>` : "—"}</td>
+      <td>${p.star1 || "—"}</td><td>${p.star2 || "—"}</td><td>${p.star3 || "—"}</td>
+    </tr>`);
+    if (p.isMulti && isExp) {
+      for (const t of p.perTeam) {
+        rows.push(`<tr class="ps-sub-row">
+          <td></td>
+          <td>${teamLogoByAbbr(t.abbr)}<span class="dim">${t.abbr}</span></td>
+          <td>${t.gp}</td><td>${t.g}</td><td>${t.a}</td>
+          <td style="color:var(--gold);font-family:var(--font-d);font-weight:700">${t.pts}</td>
+          <td>${t.stars ? `<span class="ps-stars-badge">★ ${t.stars}</span>` : "—"}</td>
+          <td>${t.star1 || "—"}</td><td>${t.star2 || "—"}</td><td>${t.star3 || "—"}</td>
+        </tr>`);
+      }
+    }
+  }
+  document.querySelector("#ps-skaters-table tbody").innerHTML = rows.length
+    ? rows.join("")
+    : `<tr><td colspan="10" class="dim" style="text-align:center;padding:1.5rem">No skater data for selected filter.</td></tr>`;
+
+  // Skater sort header click
+  document.querySelectorAll("#ps-skaters-table .ps-sort-th").forEach(th => {
+    th.addEventListener("click", () => {
+      const col = th.dataset.psCol;
+      psSortDir = psSortCol === col && psSortDir === "desc" ? "asc" : "desc";
+      psSortCol = col;
+      renderPlayerStatsTable(games);
+    });
+  });
+
+  // Multi-team expand click
+  document.querySelectorAll(".ps-multi-row").forEach(row => {
+    row.addEventListener("click", () => {
+      const name = decodeURIComponent(row.dataset.psPlayer || "");
+      psExpanded.has(name) ? psExpanded.delete(name) : psExpanded.add(name);
+      renderPlayerStatsTable(games);
+    });
+  });
+
+  // Goalie table header — dynamic, sortable
+  const gColLabels = { gp:"GP", w:"W", l:"L", otl:"OTL", so:"SO", pts:"PTS", stars:"★", star1:"1st", star2:"2nd", star3:"3rd" };
+  document.querySelector("#ps-goalies-table thead tr").innerHTML = `
+    <th class="sortable ps-sort-th${psGoalieSortCol==="name"?" ps-sort-active":""}" data-pg-col="name">
+      Player${psGoalieSortCol==="name"?(psGoalieSortDir==="asc"?" ↑":" ↓"):""}
+    </th>
+    <th>Team</th>
+    ${["gp","w","l","otl","so","pts","stars","star1","star2","star3"].map(c =>
+      `<th class="sortable ps-sort-th${psGoalieSortCol===c?" ps-sort-active":""}" data-pg-col="${c}">${gColLabels[c]}${psGoalieSortCol===c?(psGoalieSortDir==="asc"?" ↑":" ↓"):""}</th>`
+    ).join("")}`;
+
+  const gSortVal = gl => psGoalieSortCol === "name" ? gl.name.toLowerCase() : (gl[psGoalieSortCol] ?? 0);
+  const sortedGoalies = [...filteredGoalies].sort((a, b) => {
+    const av = gSortVal(a), bv = gSortVal(b);
+    const cmp = typeof av === "string" ? av.localeCompare(bv) : bv - av;
+    return psGoalieSortDir === "asc" ? -cmp : cmp;
+  });
+
+  // Goalie table rows — multi-team support mirrors skater logic
+  const goalieRows = [];
+  for (const gl of sortedGoalies) {
+    const key   = `g-${gl.name}`;
+    const isExp = psExpanded.has(key);
+    const teamCell  = gl.isMulti
+      ? `${teamLogoByAbbr("NHL")}<span class="dim">MULTI</span>`
+      : `${teamLogoByAbbr(gl.team)}<span class="dim">${gl.team || "—"}</span>`;
+    const expandIcon = gl.isMulti
+      ? `<span class="ps-expand-icon">▶</span>`
+      : `<span style="display:inline-block;width:1rem"></span>`;
+    goalieRows.push(`<tr class="${gl.isMulti ? `ps-multi-row${isExp ? " ps-expanded" : ""}` : ""}" data-ps-goalie="${encodeURIComponent(gl.name)}">
+      <td>${expandIcon}<strong>${makePlayerLink(gl.name)}</strong></td>
+      <td>${teamCell}</td>
+      <td>${gl.gp}</td>
+      <td>${gl.w}</td><td>${gl.l}</td><td>${gl.otl}</td>
+      <td>${gl.so || "—"}</td>
+      <td>${gl.pts || "—"}</td>
+      <td>${gl.stars ? `<span class="ps-stars-badge">★ ${gl.stars}</span>` : "—"}</td>
+      <td>${gl.star1 || "—"}</td><td>${gl.star2 || "—"}</td><td>${gl.star3 || "—"}</td>
+    </tr>`);
+    if (gl.isMulti && isExp) {
+      for (const t of gl.perTeam) {
+        goalieRows.push(`<tr class="ps-sub-row">
+          <td></td>
+          <td>${teamLogoByAbbr(t.abbr)}<span class="dim">${t.abbr}</span></td>
+          <td>${t.gp}</td>
+          <td>${t.w}</td><td>${t.l}</td><td>${t.otl}</td>
+          <td>${t.so || "—"}</td>
+          <td>${t.pts || "—"}</td>
+          <td>${t.stars ? `<span class="ps-stars-badge">★ ${t.stars}</span>` : "—"}</td>
+          <td>${t.star1 || "—"}</td><td>${t.star2 || "—"}</td><td>${t.star3 || "—"}</td>
+        </tr>`);
+      }
+    }
+  }
+  document.querySelector("#ps-goalies-table tbody").innerHTML = goalieRows.length
+    ? goalieRows.join("")
+    : `<tr><td colspan="12" class="dim" style="text-align:center;padding:1.5rem">No goalie data yet.</td></tr>`;
+
+  // Goalie multi-team expand click
+  document.querySelectorAll("[data-ps-goalie]").forEach(row => {
+    row.addEventListener("click", () => {
+      const key = `g-${decodeURIComponent(row.dataset.psGoalie || "")}`;
+      psExpanded.has(key) ? psExpanded.delete(key) : psExpanded.add(key);
+      renderPlayerStatsTable(games);
+    });
+  });
+
+  // Goalie sort header click
+  document.querySelectorAll("#ps-goalies-table .ps-sort-th").forEach(th => {
+    th.addEventListener("click", () => {
+      const col = th.dataset.pgCol;
+      psGoalieSortDir = psGoalieSortCol === col && psGoalieSortDir === "desc" ? "asc" : "desc";
+      psGoalieSortCol = col;
+      renderPlayerStatsTable(games);
+    });
+  });
+}
+
+async function fetchAllPlayerStats(games) {
+  playerStatsLoading = true;
+  const statusEl   = document.getElementById("ps-status");
+  const nonSpecial = ALL_GAMES.filter(g => g.seasonType?.toLowerCase() !== "special");
+  const total = nonSpecial.length;
+  let loaded = 0;
+
+  const showProgress = n => {
+    if (!statusEl) return;
+    const pct = Math.round((n / total) * 100);
+    statusEl.innerHTML = `
+      <div class="ps-progress-wrap">
+        <div class="ps-progress-label">Loading game data… ${n} / ${total} games</div>
+        <div class="ps-progress-bar-track"><div class="ps-progress-bar-fill" style="width:${pct}%"></div></div>
+      </div>`;
+  };
+
+  showProgress(0);
+  for (const g of nonSpecial) {
+    await fetchEspnGame(g);
+    loaded++;
+    if (loaded % 3 === 0 || loaded === total) showProgress(loaded);
+  }
+
+  playerStatsLoading = false;
+  playerStatsFetched = true;
+  if (statusEl) statusEl.innerHTML = "";
+  renderPlayerStatsTable(games);
+}
+
+function renderPlayerStats(games) {
+  const filtersEl = document.getElementById("ps-filters");
+  if (filtersEl) filtersEl.innerHTML = filterPillsHTML();
+  if (!document.getElementById("tab-playerstats")?.classList.contains("active")) return;
+  setupPsTeamDropdown();
+  if (playerStatsFetched) { renderPlayerStatsTable(games); return; }
+  if (playerStatsLoading) return;
+  fetchAllPlayerStats(games);
+}
+
+// Player name links → ESPN stats page (lazy ID lookup)
+document.addEventListener("click", async e => {
+  const el = e.target.closest(".ps-player-link");
+  if (!el || el.classList.contains("ps-link-loading")) return;
+  const name = decodeURIComponent(el.dataset.pname || "");
+  if (!name) return;
+  if (el.dataset.espnUrl) { window.open(el.dataset.espnUrl, "_blank"); return; }
+  el.classList.add("ps-link-loading");
+  try {
+    const r = await fetch(`/.netlify/functions/espn-player?name=${encodeURIComponent(name)}`);
+    const j = await r.json();
+    if (j.url) { el.dataset.espnUrl = j.url; window.open(j.url, "_blank"); }
+  } catch (_) {}
+  el.classList.remove("ps-link-loading");
+});
+
+// Delegated click for position pills (Skater / Goalie)
+document.addEventListener("click", e => {
+  const btn = e.target.closest("[data-ps-pos]");
+  if (!btn) return;
+  document.querySelectorAll("[data-ps-pos]").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  psPosition = btn.dataset.psPos;
+  renderPlayerStatsTable(filteredGames(false));
+});
+
+// Toggle team dropdown open/close
+document.addEventListener("click", e => {
+  const btn   = e.target.closest("#ps-team-btn");
+  const wrap  = document.getElementById("ps-team-dropdown");
+  const panel = document.getElementById("ps-team-panel");
+  if (!wrap || !panel) return;
+  if (btn) {
+    setupPsTeamDropdown();
+    const open = wrap.classList.toggle("dd-open");
+    panel.classList.toggle("open", open);
+    return;
+  }
+  // Close if click is outside the dropdown
+  if (!e.target.closest("#ps-team-dropdown")) {
+    wrap.classList.remove("dd-open");
+    panel.classList.remove("open");
+  }
+});
+
+// Preset pills inside team dropdown (All Players / Bruins Only / Opponents Only)
+document.addEventListener("click", e => {
+  const btn = e.target.closest("[data-ps-preset]");
+  if (!btn) return;
+  psFilter = btn.dataset.psPreset;
+  psTeamFilter.clear();
+  document.querySelectorAll("[data-ps-preset]").forEach(b => b.classList.toggle("active", b === btn));
+  document.querySelectorAll(".ps-team-check").forEach(cb => { cb.checked = false; });
+  // Close dropdown
+  const wrap  = document.getElementById("ps-team-dropdown");
+  const panel = document.getElementById("ps-team-panel");
+  if (wrap)  wrap.classList.remove("dd-open");
+  if (panel) panel.classList.remove("open");
+  renderPlayerStatsTable(filteredGames(false));
+});
+
+// Individual team checkbox changes
+document.addEventListener("change", e => {
+  const cb = e.target.closest(".ps-team-check");
+  if (!cb) return;
+  if (cb.checked) psTeamFilter.add(cb.value); else psTeamFilter.delete(cb.value);
+  // Deactivate presets when specific teams are chosen
+  psFilter = "all";
+  document.querySelectorAll("[data-ps-preset]").forEach(b => b.classList.remove("active"));
+  renderPlayerStatsTable(filteredGames(false));
+});
+
+function renderMap(games) {
+  const filtersEl = document.getElementById("map-filters");
+  if (filtersEl) filtersEl.innerHTML = filterPillsHTML();
+
+  const panel = document.getElementById("tab-map");
+  if (!panel?.classList.contains("active")) {
+    if (selectedArena) renderMapGameLog(games);
+    return;
+  }
+
+  if (!mapInstance) {
+    mapInstance = L.map("arena-map", { center: [44, -97], zoom: 4, minZoom: 3, maxZoom: 13 });
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+      subdomains: "abcd",
+      maxZoom: 19,
+    }).addTo(mapInstance);
+  }
+
+  mapMarkers.forEach(m => m.remove());
+  mapMarkers   = [];
+  markersByAbbr = {};
+
+  const visited = visitedArenaMap(games);
+
+  NHL_ARENAS.forEach(arena => {
+    const v          = visited[arena.abbr];
+    const isSelected = selectedArena?.abbr === arena.abbr;
+    const icon       = createLogoIcon(arena.abbr, !!v, isSelected);
+    const marker     = L.marker([arena.lat, arena.lng], { icon }).addTo(mapInstance);
+    markersByAbbr[arena.abbr] = marker;
+
+    const rec       = v ? record(v) : null;
+    const statsLine = rec
+      ? `<div class="arena-popup-stats">${rec.gp} game${rec.gp > 1 ? "s" : ""} attended · ${rec.w}–${rec.l}–${rec.otl}</div>`
+      : "";
+    const logoSrc = `https://assets.nhle.com/logos/nhl/svg/${arena.abbr}_light.svg`;
+    const logoFb  = `https://a.espncdn.com/combiner/i?img=/i/teamlogos/nhl/500/${arena.abbr.toLowerCase()}.png&h=52&w=52`;
+    const wikiUrl = `https://en.wikipedia.org/wiki/${arena.wiki || arena.arena.replace(/ /g, "_")}`;
+
+    // Hover tooltip — simple
+    marker.bindTooltip(
+      `<div class="arena-tip"><div class="arena-tip-team">${arena.team}</div><div class="arena-tip-arena">${arena.arena}</div></div>`,
+      { direction: "top", offset: [0, -22], className: "arena-tooltip" }
+    );
+
+    // Click popup — persistent, with wiki link + logo
+    marker.bindPopup(
+      `<div class="arena-popup">
+        <div class="arena-popup-main">
+          <div class="arena-popup-info">
+            <div class="arena-popup-team">${arena.team}</div>
+            <div class="arena-popup-arena"><a href="${wikiUrl}" target="_blank" rel="noopener">${arena.arena} ↗</a></div>
+            ${statsLine}
+          </div>
+          <img src="${logoSrc}" class="arena-popup-logo" alt="${arena.team}"
+               onerror="this.src='${logoFb}';this.onerror=function(){this.style.display='none'}">
+        </div>
+      </div>`,
+      { className: "arena-popup-wrap", maxWidth: 290, offset: [0, -6] }
+    );
+
+    marker.on("popupopen", () => {
+      // Remove gold ring from any previously selected marker
+      mapMarkers.forEach(m => m.getElement()?.querySelector(".arena-logo-marker")?.classList.remove("arena-logo-selected"));
+      // Apply gold ring to this marker
+      marker.getElement()?.querySelector(".arena-logo-marker")?.classList.add("arena-logo-selected");
+      selectedArena = arena;
+      expandMapGl   = null;
+      renderMapGameLog(filteredGames(false));
+    });
+
+    marker.on("popupclose", () => {
+      marker.getElement()?.querySelector(".arena-logo-marker")?.classList.remove("arena-logo-selected");
+      if (selectedArena?.abbr === arena.abbr) {
+        selectedArena = null;
+        expandMapGl   = null;
+        const el = document.getElementById("map-game-log");
+        if (el) el.innerHTML = "";
+      }
+    });
+
+    mapMarkers.push(marker);
+  });
+
+  // Auto-open TD Garden on first map tab load
+  if (!mapAutoOpened) {
+    mapAutoOpened = true;
+    setTimeout(() => markersByAbbr["BOS"]?.openPopup(), 350);
+  } else if (selectedArena) {
+    renderMapGameLog(games);
+  }
+}
+
+function renderMapGameLog(games) {
+  const el = document.getElementById("map-game-log");
+  if (!el) return;
+  if (!selectedArena) { el.innerHTML = ""; return; }
+
+  const arenaGames = gamesAtArena(games, selectedArena.abbr);
+  const sorted = [...arenaGames].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  function playoffLabel(g) {
+    const r = g.playoffRound.trim(), gm = g.playoffGame.trim();
+    if (!r && !gm) return "—";
+    return (r ? `R${r}` : "") + (gm ? `G${gm}` : "");
+  }
+
+  const rows = sorted.length
+    ? sorted.map((g, i) => {
+        const isOpen = expandMapGl === i;
+        return `
+        <tr class="main-row gl-row${isOpen ? " row-open" : ""}" data-mgl-i="${i}" style="cursor:pointer" title="Click to view game details">
+          <td class="dim">${g.season || extractSeason(g.date)}</td>
+          <td class="dim">${g.seasonType || "—"}</td>
+          <td><span class="gl-date-btn">${fmtDate(g.date)}</span> <span class="chevron">${isOpen ? "▴" : "▾"}</span></td>
+          <td>${teamLogo(g.opponent)}<span>${g.opponent}</span></td>
+          <td>${g.goalsFor}–${g.goalsAgainst}</td>
+          <td>${resultBadge(g.result)}</td>
+          <td class="dim">${playoffLabel(g)}</td>
+          <td class="dim">${g.guests.join(", ") || "—"}</td>
+          <td class="dim">${g.notes || "—"}</td>
+        </tr>
+        ${isOpen ? `<tr class="gl-expand-tr"><td colspan="9" style="padding:0"><div class="nhl-panel gl-panel" id="mgl-panel-${i}"><div class="nhl-loading">Loading game data…</div></div></td></tr>` : ""}`;
+      }).join("")
+    : `<tr><td colspan="9" style="text-align:center;color:var(--text-dim);padding:2rem">No games at this arena match the current filters.</td></tr>`;
+
+  el.innerHTML = `
+    <div class="section-heading">${selectedArena.team}
+      <span class="section-hint">— ${selectedArena.arena} · ${sorted.length} game${sorted.length !== 1 ? "s" : ""} attended · click a game for details</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Season</th><th>Game Type</th><th>Date</th><th>Opponent</th>
+          <th>Score</th><th>Result</th><th>Playoff</th><th>Guest</th><th>Notes</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+
+  el.querySelectorAll(".gl-row[data-mgl-i]").forEach(tr => {
+    tr.addEventListener("click", () => {
+      const i = +tr.dataset.mglI;
+      expandMapGl = expandMapGl === i ? null : i;
+      renderMapGameLog(games);
+    });
+  });
+
+  if (expandMapGl !== null && expandMapGl < sorted.length) {
+    loadNhlDetailForGame(sorted[expandMapGl], `mgl-panel-${expandMapGl}`);
   }
 }
 

@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Bruins Games — My Attendance Stats</title>
   <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="js/app.js" defer></script>
 </head>
 <body>
@@ -17,10 +19,12 @@
   <nav class="tabs">
     <button class="active" data-tab="tab-overview">Overview</button>
     <button data-tab="tab-gamelog">Game Log</button>
+    <button data-tab="tab-map">Map</button>
     <button data-tab="tab-opponents">vs Opponents</button>
-    <button data-tab="tab-goaldiff">Goal Differential</button>
     <button data-tab="tab-attendees">By Attendee</button>
     <button data-tab="tab-seasons">Season History</button>
+    <button data-tab="tab-playerstats">Player Stats</button>
+    <button data-tab="tab-goaldiff">Goal Differential</button>
     <button data-tab="tab-special">Special Games</button>
   </nav>
 </header>
@@ -34,17 +38,7 @@
   ══════════════════════════════════════════════════════ -->
   <div id="tab-overview" class="tab-panel active">
 
-    <div class="filters">
-      <span class="filter-label">Location:</span>
-      <button class="pill active" data-filter="All"  data-group="homeAway">All</button>
-      <button class="pill"        data-filter="Home" data-group="homeAway">Home</button>
-      <button class="pill"        data-filter="Away" data-group="homeAway">Away</button>
-      <span class="filter-label" style="margin-left:1rem">Game Type:</span>
-      <button class="pill active"  data-filter="All"       data-group="seasonType">All</button>
-      <button class="pill"         data-filter="Regular"   data-group="seasonType">Regular</button>
-      <button class="pill"         data-filter="Playoffs"  data-group="seasonType">Playoffs</button>
-      <button class="pill"         data-filter="Preseason" data-group="seasonType">Preseason</button>
-    </div>
+    <div id="ov-filters"></div>
 
     <div class="hero hero-centered">
       <div style="text-align:center">
@@ -127,49 +121,6 @@
   </div>
 
   <!-- ══════════════════════════════════════════════════════
-       TAB: GOAL DIFFERENTIAL
-  ══════════════════════════════════════════════════════ -->
-  <div id="tab-goaldiff" class="tab-panel">
-    <div id="gd-filters"></div>
-
-    <div class="stat-grid">
-      <div class="stat-card"><div class="stat-card-num" id="gd-avg">—</div><div class="stat-card-label">Avg Goal Diff</div></div>
-      <div class="stat-card"><div class="stat-card-num" id="gd-max">—</div><div class="stat-card-label">Biggest Win</div></div>
-      <div class="stat-card"><div class="stat-card-num" id="gd-min">—</div><div class="stat-card-label">Biggest Loss</div></div>
-      <div class="stat-card"><div class="stat-card-num" id="gd-positive">—</div><div class="stat-card-label">Wins by 2+</div></div>
-      <div class="stat-card"><div class="stat-card-num" id="gd-negative">—</div><div class="stat-card-label">Losses by 2+</div></div>
-      <div class="stat-card"><div class="stat-card-num" id="gd-one-win">—</div><div class="stat-card-label">Wins in 1-Goal Games</div></div>
-      <div class="stat-card"><div class="stat-card-num" id="gd-one-loss">—</div><div class="stat-card-label">Losses in 1-Goal Games</div></div>
-    </div>
-
-    <div class="section-heading">Goal Differential Distribution</div>
-    <div class="chart-container" style="height:260px">
-      <canvas id="gd-chart"></canvas>
-    </div>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1rem">
-      <div>
-        <div class="section-heading">Biggest Wins <span class="section-hint">— click date for NHL data</span></div>
-        <div class="table-wrap">
-          <table id="gd-wins-table">
-            <thead><tr><th>Date</th><th>Opponent</th><th>Score</th><th>GD</th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-      <div>
-        <div class="section-heading">Worst Losses <span class="section-hint">— click date for NHL data</span></div>
-        <div class="table-wrap">
-          <table id="gd-loss-table">
-            <thead><tr><th>Date</th><th>Opponent</th><th>Score</th><th>GD</th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ══════════════════════════════════════════════════════
        TAB: BY ATTENDEE
   ══════════════════════════════════════════════════════ -->
   <div id="tab-attendees" class="tab-panel">
@@ -204,6 +155,62 @@
   </div>
 
   <!-- ══════════════════════════════════════════════════════
+       TAB: MAP
+  ══════════════════════════════════════════════════════ -->
+  <div id="tab-map" class="tab-panel">
+    <div id="map-filters"></div>
+    <div class="section-heading">NHL Arenas <span class="section-hint">— gold pucks = arenas you've attended · hover for details</span></div>
+    <div id="arena-map"></div>
+    <div id="map-game-log"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       TAB: GOAL DIFFERENTIAL
+  ══════════════════════════════════════════════════════ -->
+  <div id="tab-goaldiff" class="tab-panel">
+    <div id="gd-filters"></div>
+
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-card-num" id="gd-avg">—</div><div class="stat-card-label">Avg Goal Diff</div></div>
+      <div class="stat-card"><div class="stat-card-num" id="gd-max">—</div><div class="stat-card-label">Biggest Win</div></div>
+      <div class="stat-card"><div class="stat-card-num" id="gd-min">—</div><div class="stat-card-label">Biggest Loss</div></div>
+      <div class="stat-card"><div class="stat-card-num" id="gd-positive">—</div><div class="stat-card-label">Wins by 2+</div></div>
+      <div class="stat-card"><div class="stat-card-num" id="gd-negative">—</div><div class="stat-card-label">Losses by 2+</div></div>
+      <div class="stat-card"><div class="stat-card-num" id="gd-one-win">—</div><div class="stat-card-label">Wins in 1-Goal Games</div></div>
+      <div class="stat-card"><div class="stat-card-num" id="gd-one-loss">—</div><div class="stat-card-label">Losses in 1-Goal Games</div></div>
+      <div class="stat-card"><div class="stat-card-num" id="gd-streak-w">—</div><div class="stat-card-label">Longest Win Streak</div></div>
+      <div class="stat-card"><div class="stat-card-num" id="gd-streak-l">—</div><div class="stat-card-label">Longest Winless Run</div></div>
+      <div class="stat-card"><div class="stat-card-num" id="gd-streak-cur">—</div><div class="stat-card-label">Current Streak</div></div>
+    </div>
+
+    <div class="section-heading">Cumulative Goals Over Time <span class="section-hint">— goals for vs goals against across all attended games</span></div>
+    <div class="chart-container" style="height:280px">
+      <canvas id="gd-chart"></canvas>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1rem">
+      <div>
+        <div class="section-heading">Biggest Wins <span class="section-hint">— click date for NHL data</span></div>
+        <div class="table-wrap">
+          <table id="gd-wins-table">
+            <thead><tr><th>Date</th><th>Opponent</th><th>Score</th><th>GD</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <div class="section-heading">Worst Losses <span class="section-hint">— click date for NHL data</span></div>
+        <div class="table-wrap">
+          <table id="gd-loss-table">
+            <thead><tr><th>Date</th><th>Opponent</th><th>Score</th><th>GD</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
        TAB: SPECIAL GAMES
   ══════════════════════════════════════════════════════ -->
   <div id="tab-special" class="tab-panel">
@@ -232,6 +239,59 @@
         </thead>
         <tbody></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       TAB: PLAYER STATS
+  ══════════════════════════════════════════════════════ -->
+  <div id="tab-playerstats" class="tab-panel">
+    <div id="ps-filters"></div>
+
+    <div class="ps-player-filter" id="ps-player-filter">
+      <span class="filter-label">Position:</span>
+      <button class="pill active" data-ps-pos="skater">Skater</button>
+      <button class="pill" data-ps-pos="goalie">Goalie</button>
+      <span class="filter-label" style="margin-left:0.75rem">Team:</span>
+      <div class="ps-team-dropdown" id="ps-team-dropdown">
+        <button class="pill ps-team-btn" id="ps-team-btn">
+          <span id="ps-team-label">All Teams</span><span class="chevron">▾</span>
+        </button>
+        <div class="ps-team-panel" id="ps-team-panel"></div>
+      </div>
+    </div>
+
+    <div id="ps-status"></div>
+
+    <div id="ps-loaded-content" style="display:none">
+      <div class="stat-grid" id="ps-stat-grid">
+        <div class="stat-card"><div class="stat-card-num" id="ps-games-loaded">—</div><div class="stat-card-label">Games with Data</div></div>
+        <div class="stat-card"><div class="stat-card-num" id="ps-total-players">—</div><div class="stat-card-label">Unique Skaters</div></div>
+        <div class="stat-card"><div class="stat-card-num" id="ps-total-goals">—</div><div class="stat-card-label">Goals Tracked</div></div>
+        <div class="stat-card"><div class="stat-card-num" id="ps-total-goalies">—</div><div class="stat-card-label">Unique Goalies</div></div>
+        <div class="stat-card"><div class="stat-card-num" id="ps-total-shutouts">—</div><div class="stat-card-label">Shutouts Tracked</div></div>
+      </div>
+
+      <div class="ps-tables-grid">
+        <div>
+          <div class="section-heading">Top Skaters <span class="section-hint">— click column header to sort · click multi-team row to expand</span></div>
+          <div class="table-wrap">
+            <table id="ps-skaters-table">
+              <thead><tr></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <div class="section-heading">Goalies <span class="section-hint">— click column header to sort · click multi-team row to expand</span></div>
+          <div class="table-wrap">
+            <table id="ps-goalies-table">
+              <thead><tr></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 

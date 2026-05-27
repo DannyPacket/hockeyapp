@@ -11,6 +11,75 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = 3000;
 
+// ── File-based game data cache ───────────────────────────────
+const CACHE_DIR = path.join(__dirname, "cache");
+if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
+
+function readCache(isoDate) {
+  try {
+    const f = path.join(CACHE_DIR, `${isoDate}.json`);
+    if (fs.existsSync(f)) return JSON.parse(fs.readFileSync(f, "utf8"));
+  } catch (_) {}
+  return null;
+}
+
+function writeCache(isoDate, data) {
+  try {
+    fs.writeFileSync(path.join(CACHE_DIR, `${isoDate}.json`), JSON.stringify(data));
+  } catch (_) {}
+}
+
+// ── Persistent player ID cache (ESPN athlete IDs) ─────────────
+const PLAYER_IDS_FILE = path.join(CACHE_DIR, "player_ids.json");
+let _playerIds = null;
+
+function readPlayerIds() {
+  if (_playerIds) return _playerIds;
+  try {
+    if (fs.existsSync(PLAYER_IDS_FILE)) _playerIds = JSON.parse(fs.readFileSync(PLAYER_IDS_FILE, "utf8"));
+  } catch (_) {}
+  if (!_playerIds) _playerIds = {};
+  return _playerIds;
+}
+
+function savePlayerIds(ids) {
+  _playerIds = ids;
+  try { fs.writeFileSync(PLAYER_IDS_FILE, JSON.stringify(ids)); } catch (_) {}
+}
+
+async function handleEspnPlayer(res, params) {
+  const name = (params.name || "").trim();
+  if (!name) { sendJSON(res, 400, { error: "name required" }); return; }
+
+  const ids = readPlayerIds();
+  if (ids[name]) {
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    sendJSON(res, 200, { id: ids[name], url: `https://www.espn.com/nhl/player/stats/_/id/${ids[name]}/${slug}` });
+    return;
+  }
+
+  try {
+    const r = await fetch(`https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/athletes?limit=5&q=${encodeURIComponent(name)}`);
+    const j = await r.json();
+    const items = j.items || j.athletes || [];
+    const match = items.find(a => {
+      const dn = (a.athlete?.displayName || a.displayName || a.fullName || "").toLowerCase();
+      return dn === name.toLowerCase();
+    }) || items[0];
+    const ath = match?.athlete || match;
+    if (!ath?.id) { sendJSON(res, 404, { error: "not found" }); return; }
+
+    const newIds = readPlayerIds();
+    newIds[name] = String(ath.id);
+    savePlayerIds(newIds);
+
+    const slug = (ath.displayName || name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    sendJSON(res, 200, { id: String(ath.id), url: `https://www.espn.com/nhl/player/stats/_/id/${ath.id}/${slug}` });
+  } catch (e) {
+    sendJSON(res, 500, { error: e.message });
+  }
+}
+
 const SHEET_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vQM8b4kevAgoInq4xFZ6S1FAi4VdyRSvyFJ15mgUezCqvmK8Io5XIlkXhi6-r7iwuvz3MDv1dQh7Xu-/pub?gid=0&single=true&output=csv";
 
@@ -238,7 +307,31 @@ async function fetchNhlGameData(nhlGameId) {
       .filter(Boolean);
   }
 
-  return { score, periods, scoringPlays, stars, teamStats };
+  // Goalies from playerByGameStats (decision goalie only)
+  const goalies = [];
+  const pgStats = raw.boxscore?.playerByGameStats;
+  if (pgStats) {
+    for (const [side, teamData] of [["homeTeam", home], ["awayTeam", away]]) {
+      const teamAbbr = teamData.abbrev || "";
+      for (const g of (pgStats[side]?.goalies || [])) {
+        const name = (g.name?.default || "").trim();
+        if (!name || !g.decision) continue;
+        const parts   = (g.saveShotsAgainst || "/").split("/");
+        const saves   = parseInt(parts[0], 10) || 0;
+        const shots   = parseInt(parts[1], 10) || saves;
+        goalies.push({
+          name,
+          team:         teamAbbr,
+          decision:     g.decision,          // "W" or "L"
+          goalsAgainst: typeof g.goalsAgainst === "number" ? g.goalsAgainst : Math.max(0, shots - saves),
+          saves,
+          toi:          g.toi || "",
+        });
+      }
+    }
+  }
+
+  return { score, periods, scoringPlays, stars, teamStats, goalies };
 }
 
 // ── ESPN fallback ─────────────────────────────────────────────
@@ -421,7 +514,40 @@ async function fetchEspnGameData(id) {
   const ppIdx = teamStats.findIndex(s => s.label === "PIM");
   teamStats.splice(ppIdx + 1, 0, { label: "Power Play", away: `${awPPG}/${awPPO}`, home: `${hmPPG}/${hmPPO}` });
 
-  return { score, periods, scoringPlays, stars, teamStats };
+  // Goalies from ESPN boxscore.players — infer decision from final score
+  const goalies = [];
+  const awayWon = parseInt(score.awayScore) > parseInt(score.homeScore);
+  const wentOT  = periods.some(p => /OT|SO/i.test(p.label));
+  for (const teamPlayers of (raw.boxscore?.players || [])) {
+    const tAbbr = teamAbbrById[teamPlayers.team?.id] || teamPlayers.team?.abbreviation || "";
+    const tWon  = (tAbbr === score.awayAbbr && awayWon) || (tAbbr === score.homeAbbr && !awayWon);
+    for (const group of (teamPlayers.statistics || [])) {
+      if (!(group.name || "").toLowerCase().includes("goali")) continue;
+      const keys = group.keys || [];
+      // Pick the goalie with most saves as the decision goalie
+      let best = null;
+      for (const entry of (group.athletes || [])) {
+        const statObj = {};
+        (entry.stats || []).forEach((v, i) => { if (keys[i]) statObj[keys[i]] = v; });
+        const saves = parseInt(statObj.saves, 10) || 0;
+        if (!best || saves > best.saves) {
+          best = { name: entry.athlete?.displayName || "", saves, ga: parseInt(statObj.goalsAgainst, 10) || 0 };
+        }
+      }
+      if (best?.name) {
+        goalies.push({
+          name:         best.name,
+          team:         tAbbr,
+          decision:     tWon ? "W" : "L",
+          goalsAgainst: best.ga,
+          saves:        best.saves,
+          toi:          "",
+        });
+      }
+    }
+  }
+
+  return { score, periods, scoringPlays, stars, teamStats, goalies };
 }
 
 // ── Handler: espn-game ───────────────────────────────────────
@@ -435,6 +561,12 @@ async function handleEspnGame(res, params) {
     const isoDate = date
       ? (date.length === 8 ? `${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)}` : date)
       : null;
+
+    // Check file cache first — skip all API calls if we have data on disk
+    if (isoDate) {
+      const cached = readCache(isoDate);
+      if (cached) return sendJSON(res, 200, cached);
+    }
 
     // Primary: NHL API — resolve game ID and ESPN event ID in parallel from the date
     let resolvedNhlId = nhlGameId || null;
@@ -480,11 +612,9 @@ async function handleEspnGame(res, params) {
       result = await fetchEspnGameData(espnId);
     }
 
-    sendJSON(res, 200, {
-      eventId: espnId || null,
-      nhlGameId: nhlGameId || null,
-      ...result,
-    });
+    const payload = { eventId: espnId || null, nhlGameId: nhlGameId || null, ...result };
+    if (isoDate) writeCache(isoDate, payload);
+    sendJSON(res, 200, payload);
   } catch (err) {
     sendJSON(res, 500, { error: err.message });
   }
@@ -518,8 +648,9 @@ const server = http.createServer((req, res) => {
   const pathname = parsed.pathname;
   const params   = Object.fromEntries(parsed.searchParams);
 
-  if (pathname === "/.netlify/functions/fetch-games") return handleFetchGames(res);
-  if (pathname === "/.netlify/functions/espn-game")   return handleEspnGame(res, params);
+  if (pathname === "/.netlify/functions/fetch-games")  return handleFetchGames(res);
+  if (pathname === "/.netlify/functions/espn-game")    return handleEspnGame(res, params);
+  if (pathname === "/.netlify/functions/espn-player")  return handleEspnPlayer(res, params);
 
   // Static file serving
   let filePath = path.join(__dirname, pathname === "/" ? "index.html" : pathname);
