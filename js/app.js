@@ -140,6 +140,17 @@ const NHL_ARENAS = [
 const ABBR_TO_TEAM = Object.fromEntries(NHL_ARENAS.map(a => [a.abbr, a.team]));
 function teamFullName(abbr) { return ABBR_TO_TEAM[abbr?.toUpperCase()] || abbr || "Unknown"; }
 
+// City display name for each opponent abbreviation (used in filter dropdown)
+const ABBR_TO_CITY = {
+  BUF:"Buffalo", TOR:"Toronto", MTL:"Montreal", OTT:"Ottawa", DET:"Detroit",
+  TBL:"Tampa Bay", FLA:"Florida", CAR:"Carolina", NJD:"New Jersey", NYR:"NY Rangers",
+  NYI:"NY Islanders", PHI:"Philadelphia", PIT:"Pittsburgh", WSH:"Washington",
+  CBJ:"Columbus", NSH:"Nashville", WPG:"Winnipeg", MIN:"Minnesota", CHI:"Chicago",
+  STL:"St. Louis", COL:"Colorado", DAL:"Dallas", ARI:"Arizona", UTA:"Utah",
+  VGK:"Vegas", SEA:"Seattle", VAN:"Vancouver", CGY:"Calgary", EDM:"Edmonton",
+  ANA:"Anaheim", LAK:"Los Angeles", SJS:"San Jose",
+};
+
 const OPP_TO_ABBR = {
   "Buffalo":"BUF","Buffalo Sabres":"BUF","Toronto":"TOR","Toronto Maple Leafs":"TOR",
   "Montreal":"MTL","Montreal Canadiens":"MTL","Ottawa":"OTT","Ottawa Senators":"OTT",
@@ -175,8 +186,9 @@ function gamecenterUrl(g, gameId) {
 
 // ── STATE ─────────────────────────────────────────────────────
 let ALL_GAMES = [];
-let activeFilters = { homeAway: "All", seasonType: "All", season: [] };
-let seasonDropdownOpen = false;
+let activeFilters = { homeAway: "All", seasonType: "All", season: [], opponent: [] };
+let seasonDropdownOpen   = false;
+let opponentDropdownOpen = false;
 
 const SORT = {
   opp:    { col: "gp",     dir: "desc" },
@@ -205,15 +217,33 @@ let playerStatsLoading  = false;
 let psPosition          = "skater"; // "skater" | "goalie"
 let psFilter            = "all";    // "all" | "bos" | "opp" (preset; ignored when psTeamFilter non-empty)
 let psTeamFilter        = new Set(); // specific team abbrs; empty = use psFilter preset
+let psMinGP             = 1;        // minimum games played to appear in skater/goalie tables
 let psDropdownBuilt     = false;
 let psSortCol           = "pts";
 let psSortDir           = "desc";
 let psGoalieSortCol     = "w";
 let psGoalieSortDir     = "desc";
 let psExpanded          = new Set(); // set of player names that are expanded (multi-team)
+let psGameExpanded      = new Set(); // set of "name|abbr" keys with per-game list visible
+let psGameSortDir       = "desc";   // "asc"|"desc" — sorts game-detail rows by date
 
-const nhlCache    = {};  // unused — kept for compat
-const gameIdCache = {};  // unused — kept for compat
+// Opponent-subsection sort — active while a skater's breakdown is visible
+let psOppSortCol        = "gp";    // column used to sort opponent rows
+let psOppSortDir        = "desc";
+let psFrozenSortCol     = null;    // snapshot of psSortCol taken when subsection opened
+let psFrozenSortDir     = null;
+
+// Goalie opponent-subsection sort
+let psGoalieOppSortCol  = "gp";
+let psGoalieOppSortDir  = "desc";
+let psGoalieFrozenSortCol = null;  // snapshot of psGoalieSortCol when subsection opened
+let psGoalieFrozenSortDir = null;
+
+const nhlCache       = {};  // unused — kept for compat
+const gameIdCache    = {};  // unused — kept for compat
+const espnAthleteIds = {};  // name → ESPN athlete ID (extracted from star headshots)
+const espnNoLink     = new Set(); // player names confirmed to have no ESPN profile
+let   espnPrefetchDone = false;   // guard: only pre-fetch once per session
 
 // ── BOOT ──────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
@@ -241,7 +271,7 @@ function setupTabs() {
         if (mapInstance) setTimeout(() => mapInstance.invalidateSize(), 50);
       }
       if (btn.dataset.tab === "tab-playerstats") {
-        renderPlayerStats(filteredGames(false));
+        renderPlayerStats(filteredGames(false, false));
       }
     });
   });
@@ -270,6 +300,7 @@ function setupFilterDelegation() {
   document.addEventListener("click", e => {
     if (e.target.closest(".season-dd-trigger")) {
       seasonDropdownOpen = !seasonDropdownOpen;
+      if (seasonDropdownOpen) opponentDropdownOpen = false;
       renderAll();
       return;
     }
@@ -290,6 +321,35 @@ function setupFilterDelegation() {
       const idx = activeFilters.season.indexOf(val);
       if (idx === -1) activeFilters.season.push(val);
       else            activeFilters.season.splice(idx, 1);
+    }
+    renderAll();
+  });
+
+  // Opponent dropdown toggle + outside-click close
+  document.addEventListener("click", e => {
+    if (e.target.closest(".opp-dd-trigger")) {
+      opponentDropdownOpen = !opponentDropdownOpen;
+      if (opponentDropdownOpen) seasonDropdownOpen = false;
+      renderAll();
+      return;
+    }
+    if (!e.target.closest(".opp-dd-wrap") && opponentDropdownOpen) {
+      opponentDropdownOpen = false;
+      renderAll();
+    }
+  });
+
+  // Opponent checkbox change
+  document.addEventListener("change", e => {
+    const cb = e.target.closest(".opp-dd-check");
+    if (!cb) return;
+    const val = cb.value;
+    if (val === "__all__") {
+      activeFilters.opponent = [];
+    } else {
+      const idx = activeFilters.opponent.indexOf(val);
+      if (idx === -1) activeFilters.opponent.push(val);
+      else            activeFilters.opponent.splice(idx, 1);
     }
     renderAll();
   });
@@ -344,7 +404,7 @@ function normalizeGames(raw) {
 }
 
 // ── FILTER ────────────────────────────────────────────────────
-function filteredGames(includeSpecial = false) {
+function filteredGames(includeSpecial = false, applyOpp = true) {
   return ALL_GAMES.filter(g => {
     const isSp = g.seasonType.toLowerCase() === "special";
     if (!includeSpecial && isSp)  return false;
@@ -353,9 +413,23 @@ function filteredGames(includeSpecial = false) {
       if (activeFilters.homeAway   !== "All" && g.homeAway   !== activeFilters.homeAway)   return false;
       if (activeFilters.seasonType !== "All" && g.seasonType !== activeFilters.seasonType) return false;
       if (activeFilters.season.length > 0 && !activeFilters.season.includes(g.season))    return false;
+      if (applyOpp && activeFilters.opponent.length > 0) {
+        const abbr = OPP_TO_ABBR[g.opponent] || g.opponent;
+        if (!activeFilters.opponent.includes(abbr)) return false;
+      }
     }
     return true;
   });
+}
+
+function uniqueOpponents() {
+  const abbrs = new Set(
+    ALL_GAMES
+      .filter(g => g.seasonType.toLowerCase() !== "special")
+      .map(g => OPP_TO_ABBR[g.opponent] || g.opponent)
+      .filter(Boolean)
+  );
+  return [...abbrs].sort((a, b) => (ABBR_TO_CITY[a] || a).localeCompare(ABBR_TO_CITY[b] || b));
 }
 
 function uniqueSeasons() {
@@ -378,8 +452,9 @@ function availableSeasons() {
 
 function navigateToGameLog(isoDate) {
   // Reset filters so the target game is always visible
-  activeFilters = { homeAway: "All", seasonType: "All", season: [] };
-  seasonDropdownOpen = false;
+  activeFilters = { homeAway: "All", seasonType: "All", season: [], opponent: [] };
+  seasonDropdownOpen   = false;
+  opponentDropdownOpen = false;
   document.querySelectorAll(".pill[data-group]").forEach(p => {
     p.classList.toggle("active", p.dataset.filter === "All");
   });
@@ -439,7 +514,7 @@ const resultBadge = r => `<span class="badge badge-${r === "W" ? "W" : isLoss(r)
 const fmtDate = str => { if (!str) return "—"; const d = new Date(str); return isNaN(d) ? str : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
 const extractSeason = s => { if (!s) return "Unknown"; const d = new Date(s), y = d.getFullYear(), m = d.getMonth(); return m >= 9 ? `${y}–${String(y+1).slice(2)}` : `${y-1}–${String(y).slice(2)}`; };
 
-function filterPillsHTML() {
+function filterPillsHTML(showOpponent = true) {
   const ha = activeFilters.homeAway, st = activeFilters.seasonType;
   const sel = activeFilters.season;
   const seasons = availableSeasons();
@@ -456,16 +531,44 @@ function filterPillsHTML() {
       <span>${s}</span>
     </label>`
   ).join("");
+  // Opponent dropdown
+  const oppSel  = activeFilters.opponent;
+  const opps    = uniqueOpponents();
+  const oppLabel = oppSel.length === 0 ? "All Teams"
+    : oppSel.length === 1 ? (ABBR_TO_CITY[oppSel[0]] || oppSel[0])
+    : `${oppSel.length} Teams`;
+  const oppAllItem = `<label class="opp-dd-item opp-dd-all">
+      <input type="checkbox" class="opp-dd-check" value="__all__"${oppSel.length === 0 ? " checked" : ""}>
+      <span>All Teams</span>
+    </label><div class="season-dd-divider"></div>`;
+  const oppItems = opps.map(abbr => {
+    const city = ABBR_TO_CITY[abbr] || abbr;
+    const logoSrc = `https://assets.nhle.com/logos/nhl/svg/${abbr}_light.svg`;
+    return `<label class="opp-dd-item">
+      <input type="checkbox" class="opp-dd-check" value="${abbr}"${oppSel.includes(abbr) ? " checked" : ""}>
+      <img src="${logoSrc}" class="team-logo" onerror="this.style.display='none'">
+      <span>${city}</span>
+    </label>`;
+  }).join("");
+
   return `<div class="filters">
     <span class="filter-label">Location:</span>
     ${["All","Home","Away"].map(v => `<button class="pill${ha===v?" active":""}" data-filter="${v}" data-group="homeAway">${v}</button>`).join("")}
-    <span class="filter-label" style="margin-left:1rem">Game Type:</span>
+    <span class="filter-sep"></span>
+    <span class="filter-label">Game Type:</span>
     ${["All","Regular","Playoffs","Preseason"].map(v => `<button class="pill${st===v?" active":""}" data-filter="${v}" data-group="seasonType">${v}</button>`).join("")}
-    <span class="filter-label" style="margin-left:1rem">Season:</span>
+    <span class="filter-sep"></span>
+    <span class="filter-label">Season:</span>
     <div class="season-dd-wrap${seasonDropdownOpen ? " dd-open" : ""}">
       <button class="pill season-dd-trigger${sel.length > 0 ? " active" : ""}">${label} <span class="chevron">▾</span></button>
       <div class="season-dd-panel${seasonDropdownOpen ? " open" : ""}">${allItem}${items}</div>
     </div>
+    ${showOpponent ? `<span class="filter-sep"></span>
+    <span class="filter-label">Opponent:</span>
+    <div class="opp-dd-wrap${opponentDropdownOpen ? " dd-open" : ""}">
+      <button class="pill opp-dd-trigger${oppSel.length > 0 ? " active" : ""}">${oppLabel} <span class="chevron">▾</span></button>
+      <div class="opp-dd-panel${opponentDropdownOpen ? " open" : ""}">${oppAllItem}${oppItems}</div>
+    </div>` : ""}
   </div>`;
 }
 
@@ -499,6 +602,7 @@ function sortRows(rows, key, colMap) {
 // ── ESPN API (via Netlify proxy — no CORS issues) ─────────────
 // Static map of known ESPN game IDs: "YYYY-MM-DD" → espn event id
 const ESPN_GAME_ID_MAP = {
+  "2021-10-03": "401357725",   // NYR @ BOS  Oct 3 2021
   "2026-04-23": "401869759",   // BUF @ BOS  Apr 23 2026 (R1G3)
   "2025-02-20": "401688921",   // 4 Nations Face-Off Final: CAN vs USA
   // Add future special-event ESPN game IDs here keyed by "YYYY-MM-DD"
@@ -1239,16 +1343,37 @@ function gamesAtArena(games, abbr) {
 // ── PLAYER STATS ──────────────────────────────────────────────
 
 function aggregatePlayerStats(games) {
-  const byPlayer = {}; // name → { perTeam: { abbr → {g,a,pts,gp:Set,stars} } }
+  const byPlayer = {};
 
-  const addContrib = (name, abbr, type, dateStr) => {
-    if (!name || !abbr) return;
+  const getOrCreateEntry = (name, abbr) => {
     if (!byPlayer[name]) byPlayer[name] = { perTeam: {} };
-    if (!byPlayer[name].perTeam[abbr]) byPlayer[name].perTeam[abbr] = { g: 0, a: 0, pts: 0, gp: new Set(), stars: 0, star1: 0, star2: 0, star3: 0 };
-    const e = byPlayer[name].perTeam[abbr];
+    if (!byPlayer[name].perTeam[abbr])
+      byPlayer[name].perTeam[abbr] = { g: 0, a: 0, pts: 0, gp: new Set(), stars: 0, star1: 0, star2: 0, star3: 0, gamesList: [] };
+    return byPlayer[name].perTeam[abbr];
+  };
+
+  const getOrCreateGame = (entry, dateStr) => {
+    let gm = entry.gamesList.find(x => x.date === dateStr);
+    if (!gm) { gm = { date: dateStr, g: 0, a: 0, pts: 0, starOrder: 0, opp: null }; entry.gamesList.push(gm); }
+    return gm;
+  };
+
+  // Derive opponent abbr from cached score — the other team from the player's abbr
+  const setOpp = (gm, abbr, cached) => {
+    if (gm.opp || !cached?.score) return;
+    const h  = (cached.score.homeAbbr || "").toUpperCase();
+    const aw = (cached.score.awayAbbr || "").toUpperCase();
+    gm.opp = abbr === h ? aw : h;
+  };
+
+  const addContrib = (name, abbr, type, dateStr, cached) => {
+    if (!name || !abbr) return;
+    const e  = getOrCreateEntry(name, abbr);
+    const gm = getOrCreateGame(e, dateStr);
+    setOpp(gm, abbr, cached);
     e.gp.add(dateStr);
-    if (type === "g") { e.g++; e.pts++; }
-    else              { e.a++; e.pts++; }
+    if (type === "g") { e.g++; e.pts++; gm.g++; gm.pts++; }
+    else              { e.a++; e.pts++; gm.a++; gm.pts++; }
   };
 
   for (const g of games) {
@@ -1257,24 +1382,26 @@ function aggregatePlayerStats(games) {
     if (!cached) continue;
     for (const play of (cached.scoringPlays || [])) {
       const abbr = (play.team || "").toUpperCase();
-      addContrib(play.scorer, abbr, "g", dateStr);
-      (play.assists || []).forEach(n => addContrib(n, abbr, "a", dateStr));
+      addContrib(play.scorer, abbr, "g", dateStr, cached);
+      (play.assists || []).forEach(n => addContrib(n, abbr, "a", dateStr, cached));
     }
     for (const st of (cached.stars || [])) {
       if (!st?.name) continue;
       const abbr = (st.team || "").toUpperCase();
-      if (!byPlayer[st.name]) byPlayer[st.name] = { perTeam: {} };
-      if (!byPlayer[st.name].perTeam[abbr]) byPlayer[st.name].perTeam[abbr] = { g: 0, a: 0, pts: 0, gp: new Set(), stars: 0, star1: 0, star2: 0, star3: 0 };
-      const se = byPlayer[st.name].perTeam[abbr];
+      const se   = getOrCreateEntry(st.name, abbr);
+      const gm   = getOrCreateGame(se, dateStr);
+      setOpp(gm, abbr, cached);
+      se.gp.add(dateStr);
       se.stars++;
       if (st.order === 1) se.star1++;
       else if (st.order === 2) se.star2++;
       else if (st.order === 3) se.star3++;
+      gm.starOrder = st.order || gm.starOrder;
     }
   }
 
   return Object.entries(byPlayer).map(([name, data]) => {
-    const teams = Object.keys(data.perTeam);
+    const teams   = Object.keys(data.perTeam);
     const isMulti = teams.length > 1;
     let g = 0, a = 0, pts = 0, stars = 0, star1 = 0, star2 = 0, star3 = 0;
     const allGP = new Set();
@@ -1289,23 +1416,40 @@ function aggregatePlayerStats(games) {
       g, a, pts, stars, star1, star2, star3, gp: allGP.size,
       perTeam: teams.map(abbr => {
         const e = data.perTeam[abbr];
-        return { abbr, g: e.g, a: e.a, pts: e.pts, stars: e.stars, star1: e.star1, star2: e.star2, star3: e.star3, gp: e.gp.size };
+        return {
+          abbr, g: e.g, a: e.a, pts: e.pts, stars: e.stars,
+          star1: e.star1, star2: e.star2, star3: e.star3, gp: e.gp.size,
+          gamesList: [...e.gamesList].sort((x, y) => x.date.localeCompare(y.date)),
+        };
       }).sort((x, y) => y.pts - x.pts),
     };
   });
 }
 
 function aggregateGoalieStats(games) {
-  // byGoalie: name → { perTeam: { abbr → { w,l,otl,so,pts,stars,gp } } }
   const byGoalie = {};
 
   const getEntry = (name, abbr) => {
     if (!byGoalie[name]) byGoalie[name] = { perTeam: {} };
-    if (!byGoalie[name].perTeam[abbr]) byGoalie[name].perTeam[abbr] = { w: 0, l: 0, otl: 0, so: 0, pts: 0, stars: 0, star1: 0, star2: 0, star3: 0, gp: 0 };
+    if (!byGoalie[name].perTeam[abbr])
+      byGoalie[name].perTeam[abbr] = { w: 0, l: 0, otl: 0, so: 0, pts: 0, stars: 0, star1: 0, star2: 0, star3: 0, gp: 0, saves: 0, sa: 0, gamesSeen: new Set(), gamesList: [] };
     return byGoalie[name].perTeam[abbr];
   };
 
-  // Pass 1: decision goalies
+  const getOrCreateGame = (entry, dateStr) => {
+    let gm = entry.gamesList.find(x => x.date === dateStr);
+    if (!gm) { gm = { date: dateStr, decision: null, goalsAgainst: null, saves: null, so: false, pts: 0, starOrder: 0, opp: null }; entry.gamesList.push(gm); }
+    return gm;
+  };
+
+  const setGlOpp = (gm, abbr, cached) => {
+    if (gm.opp || !cached?.score) return;
+    const h  = (cached.score.homeAbbr || "").toUpperCase();
+    const aw = (cached.score.awayAbbr || "").toUpperCase();
+    gm.opp = abbr === h ? aw : h;
+  };
+
+  // Pass 1: decision goalies from cached.goalies
   for (const g of games) {
     const dateStr = normaliseDateStr(g.date);
     const cached  = espnCache[dateStr];
@@ -1315,33 +1459,75 @@ function aggregateGoalieStats(games) {
       if (!gl.name || !gl.decision) continue;
       const abbr = (gl.team || "").toUpperCase();
       const e = getEntry(gl.name, abbr);
+      if (e.gamesSeen.has(dateStr)) continue;
+      e.gamesSeen.add(dateStr);
       e.gp++;
+      let decision;
       if (gl.decision === "W") {
-        e.w++;
+        e.w++; decision = "W";
       } else {
         const bosLostOT = abbr === "BOS" && g.result === "OTL";
         const oppLostOT = abbr !== "BOS" && g.result === "W" && wentOT;
-        (bosLostOT || oppLostOT) ? e.otl++ : e.l++;
+        if (bosLostOT || oppLostOT) { e.otl++; decision = "OTL"; }
+        else                        { e.l++;   decision = "L"; }
       }
-      if (gl.goalsAgainst === 0) e.so++;
+      const so = gl.goalsAgainst === 0;
+      if (so) e.so++;
+      const gm = getOrCreateGame(e, dateStr);
+      setGlOpp(gm, abbr, cached);
+      gm.decision     = decision;
+      gm.goalsAgainst = gl.goalsAgainst ?? null;
+      gm.saves        = gl.saves ?? null;
+      gm.so           = so;
+      if (gl.saves !== null && gl.saves !== undefined) {
+        e.saves += gl.saves;
+        e.sa    += (gl.saves || 0) + (gl.goalsAgainst || 0);
+      }
     }
   }
 
-  // Pass 2: star appearances (pos="G" or already known goalie)
+  // Pass 2: star appearances — also infers W/L for games missing from cached.goalies
   for (const g of games) {
     const dateStr = normaliseDateStr(g.date);
     const cached  = espnCache[dateStr];
     if (!cached) continue;
+    const wentOT = (cached.periods || []).some(p => /OT|SO/i.test(p.label));
     for (const st of (cached.stars || [])) {
       if (!st?.name) continue;
       const isKnown   = !!byGoalie[st.name];
       const posGoalie = (st.pos || "").toUpperCase() === "G";
       if (!isKnown && !posGoalie) continue;
-      const ge = getEntry(st.name, (st.team || "").toUpperCase());
+      const abbr = (st.team || "").toUpperCase();
+      const ge   = getEntry(st.name, abbr);
       ge.stars++;
       if (st.order === 1) ge.star1++;
       else if (st.order === 2) ge.star2++;
       else if (st.order === 3) ge.star3++;
+      // If this game wasn't captured in Pass 1, infer W/L from the game result
+      if (!ge.gamesSeen.has(dateStr)) {
+        ge.gamesSeen.add(dateStr);
+        ge.gp++;
+        const isBOS = abbr === "BOS";
+        let decision;
+        if (isBOS) {
+          if (g.result === "W")        { ge.w++;   decision = "W"; }
+          else if (g.result === "OTL") { ge.otl++; decision = "OTL"; }
+          else                         { ge.l++;   decision = "L"; }
+        } else {
+          if (g.result === "W") {
+            if (wentOT) { ge.otl++; decision = "OTL"; }
+            else        { ge.l++;   decision = "L"; }
+          } else {
+            ge.w++; decision = "W";
+          }
+        }
+        const gm = getOrCreateGame(ge, dateStr);
+        setGlOpp(gm, abbr, cached);
+        gm.decision = decision;
+      }
+      const gm = getOrCreateGame(ge, dateStr);
+      setGlOpp(gm, abbr, cached);
+      gm.starOrder = st.order || gm.starOrder;
     }
   }
 
@@ -1353,31 +1539,53 @@ function aggregateGoalieStats(games) {
     if (!cached) continue;
     for (const play of (cached.scoringPlays || [])) {
       const abbr = (play.team || "").toUpperCase();
-      if (goalieNames.has(play.scorer))                          getEntry(play.scorer, abbr).pts++;
-      (play.assists || []).forEach(n => { if (goalieNames.has(n)) getEntry(n, abbr).pts++; });
+      if (goalieNames.has(play.scorer)) {
+        const e = getEntry(play.scorer, abbr);
+        e.pts++;
+        getOrCreateGame(e, dateStr).pts++;
+      }
+      (play.assists || []).forEach(n => {
+        if (goalieNames.has(n)) {
+          const e = getEntry(n, abbr);
+          e.pts++;
+          getOrCreateGame(e, dateStr).pts++;
+        }
+      });
     }
   }
 
-  // Flatten — aggregate totals + per-team breakdown
+  // Flatten
   return Object.entries(byGoalie).map(([name, data]) => {
     const teams   = Object.keys(data.perTeam);
     const isMulti = teams.length > 1;
-    let w = 0, l = 0, otl = 0, so = 0, pts = 0, stars = 0, star1 = 0, star2 = 0, star3 = 0, gp = 0;
+    let w = 0, l = 0, otl = 0, so = 0, pts = 0, stars = 0, star1 = 0, star2 = 0, star3 = 0, gp = 0, saves = 0, sa = 0;
     for (const e of Object.values(data.perTeam)) {
       w += e.w; l += e.l; otl += e.otl; so += e.so; pts += e.pts;
       stars += e.stars; star1 += e.star1; star2 += e.star2; star3 += e.star3; gp += e.gp;
+      saves += e.saves; sa += e.sa;
     }
     return {
       name, isMulti,
       team: isMulti ? "NHL" : (teams[0] || ""),
-      w, l, otl, so, pts, stars, star1, star2, star3, gp,
-      perTeam: teams.map(abbr => ({ abbr, ...data.perTeam[abbr] })).sort((a, b) => b.w - a.w),
+      w, l, otl, so, pts, stars, star1, star2, star3, gp, saves, sa,
+      perTeam: teams.map(abbr => {
+        const e = data.perTeam[abbr];
+        return {
+          abbr, w: e.w, l: e.l, otl: e.otl, so: e.so, pts: e.pts,
+          stars: e.stars, star1: e.star1, star2: e.star2, star3: e.star3, gp: e.gp,
+          saves: e.saves, sa: e.sa,
+          gamesList: [...e.gamesList].sort((x, y) => x.date.localeCompare(y.date)),
+        };
+      }).sort((a, b) => b.w - a.w),
     };
   }).sort((a, b) => b.w - a.w || b.gp - a.gp);
 }
 
 function makePlayerLink(name) {
-  return `<span class="ps-player-link" data-pname="${encodeURIComponent(name)}">${name}</span>`;
+  const noLink = espnNoLink.has(name) && !espnAthleteIds[name];
+  const cls = noLink ? "ps-player-link ps-link-no-espn" : "ps-player-link";
+  const tip = noLink ? ` title="No ESPN profile found"` : "";
+  return `<span class="${cls}"${tip} data-pname="${encodeURIComponent(name)}">${name}</span>`;
 }
 
 function teamLogoByAbbr(abbr) {
@@ -1423,12 +1631,13 @@ function projectGoalie(goalie) {
     return goalie;
   }
   if (teams.length === 0) return null;
-  let w = 0, l = 0, otl = 0, so = 0, pts = 0, stars = 0, star1 = 0, star2 = 0, star3 = 0, gp = 0;
+  let w = 0, l = 0, otl = 0, so = 0, pts = 0, stars = 0, star1 = 0, star2 = 0, star3 = 0, gp = 0, saves = 0, sa = 0;
   for (const t of teams) {
     w += t.w; l += t.l; otl += t.otl; so += t.so; pts += t.pts;
     stars += t.stars; star1 += t.star1; star2 += t.star2; star3 += t.star3; gp += t.gp;
+    saves += (t.saves || 0); sa += (t.sa || 0);
   }
-  return { ...goalie, team: teams.length === 1 ? teams[0].abbr : "NHL", isMulti: teams.length > 1, w, l, otl, so, pts, stars, star1, star2, star3, gp, perTeam: teams };
+  return { ...goalie, team: teams.length === 1 ? teams[0].abbr : "NHL", isMulti: teams.length > 1, w, l, otl, so, pts, stars, star1, star2, star3, gp, saves, sa, perTeam: teams };
 }
 
 function updatePsTeamLabel() {
@@ -1466,9 +1675,99 @@ function setupPsTeamDropdown() {
     </div>`;
 }
 
+// Measure widest player name in full (unfiltered) list for stable column width
+function measurePlayerColPx(names) {
+  try {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    // Match the bold font used in the table cells
+    ctx.font = "bold 14px Inter, -apple-system, sans-serif";
+    const maxPx = Math.max(...names.map(n => ctx.measureText(n).width), 100);
+    return Math.ceil(maxPx) + 52; // +52 for expand arrow + cell padding + link decoration
+  } catch (_) { return 170; }
+}
+
+// ── Opponent-grouping helpers ──────────────────────────────────
+// Collapse a skater's gamesList into one entry per opponent.
+// Sorted by the active skater sort column/direction so header clicks apply to
+// both the main table AND any open opponent breakdown rows.
+function groupByOpponent(gamesList) {
+  const byOpp = {};
+  for (const gm of (gamesList || [])) {
+    const opp = gm.opp || "???";
+    if (!byOpp[opp]) byOpp[opp] = { opp, gp: 0, g: 0, a: 0, pts: 0, stars: 0, star1: 0, star2: 0, star3: 0 };
+    const o = byOpp[opp];
+    o.gp++;
+    o.g    += gm.g   || 0;
+    o.a    += gm.a   || 0;
+    o.pts  += gm.pts || 0;
+    if (gm.starOrder) {
+      o.stars++;
+      if      (gm.starOrder === 1) o.star1++;
+      else if (gm.starOrder === 2) o.star2++;
+      else if (gm.starOrder === 3) o.star3++;
+    }
+  }
+  // Add PPG (pts-per-game) to each bucket
+  const groups = Object.values(byOpp).map(o => ({ ...o, ppg: o.gp > 0 ? o.pts / o.gp : 0 }));
+  const asc = psOppSortDir === "asc";
+  if (psOppSortCol === "name") {
+    return groups.sort((a, b) => asc ? a.opp.localeCompare(b.opp) : b.opp.localeCompare(a.opp));
+  }
+  const SKATER_KEYS = new Set(["gp","g","a","pts","ppg","stars","star1","star2","star3"]);
+  const key = SKATER_KEYS.has(psOppSortCol) ? psOppSortCol : "gp";
+  return groups.sort((a, b) => asc ? (a[key]||0) - (b[key]||0) : (b[key]||0) - (a[key]||0));
+}
+
+// Collapse a goalie's gamesList into one entry per opponent.
+// Sorted by the active goalie sort column/direction.
+function groupGoalieByOpponent(gamesList) {
+  const byOpp = {};
+  for (const gm of (gamesList || [])) {
+    const opp = gm.opp || "???";
+    if (!byOpp[opp]) byOpp[opp] = { opp, gp: 0, w: 0, l: 0, otl: 0, so: 0, pts: 0, stars: 0, star1: 0, star2: 0, star3: 0, saves: 0, sa: 0 };
+    const o = byOpp[opp];
+    o.gp++;
+    if      (gm.decision === "W")   o.w++;
+    else if (gm.decision === "OTL") o.otl++;
+    else if (gm.decision === "L")   o.l++;
+    if (gm.so)  o.so++;
+    o.pts  += gm.pts || 0;
+    if (gm.saves !== null && gm.saves !== undefined) {
+      o.saves += gm.saves || 0;
+      o.sa    += (gm.saves || 0) + (gm.goalsAgainst || 0);
+    }
+    if (gm.starOrder) {
+      o.stars++;
+      if      (gm.starOrder === 1) o.star1++;
+      else if (gm.starOrder === 2) o.star2++;
+      else if (gm.starOrder === 3) o.star3++;
+    }
+  }
+  const groups = Object.values(byOpp);
+  const asc = psGoalieOppSortDir === "asc";
+  if (psGoalieOppSortCol === "name") {
+    return groups.sort((a, b) => asc ? a.opp.localeCompare(b.opp) : b.opp.localeCompare(a.opp));
+  }
+  const svpOf = o => o.sa > 0 ? o.saves / o.sa : 0;
+  const GOALIE_KEYS = new Set(["gp","w","l","otl","so","pts","stars","star1","star2","star3"]);
+  if (psGoalieOppSortCol === "svp") {
+    return groups.sort((a, b) => asc ? svpOf(a) - svpOf(b) : svpOf(b) - svpOf(a));
+  }
+  const key = GOALIE_KEYS.has(psGoalieOppSortCol) ? psGoalieOppSortCol : "gp";
+  return groups.sort((a, b) => asc ? (a[key]||0) - (b[key]||0) : (b[key]||0) - (a[key]||0));
+}
+
 function renderPlayerStatsTable(games) {
   const allSkaters = aggregatePlayerStats(games);
   const goalies    = aggregateGoalieStats(games);
+
+  // Set player column width based on the longest name across ALL players (before any filter)
+  const allNames = [...allSkaters.map(p => p.name), ...goalies.map(gl => gl.name)];
+  const colPx    = measurePlayerColPx(allNames);
+  const colW     = `${colPx}px`;
+  document.querySelector("#ps-skaters-table")?.style.setProperty("--ps-player-col-w", colW);
+  document.querySelector("#ps-goalies-table")?.style.setProperty("--ps-player-col-w", colW);
 
   // Show only the active position table full-width; hide the other
   const grid = document.querySelector(".ps-tables-grid");
@@ -1486,11 +1785,13 @@ function renderPlayerStatsTable(games) {
   }
 
   updatePsTeamLabel();
-  const filtered        = allSkaters.map(p => projectPlayer(p)).filter(Boolean);
-  const filteredGoalies = goalies.map(gl => projectGoalie(gl)).filter(Boolean);
+  const goalieNames     = new Set(goalies.map(gl => gl.name));
+  const filtered        = allSkaters.filter(p => !goalieNames.has(p.name)).map(p => projectPlayer(p)).filter(Boolean).filter(p => p.gp >= psMinGP);
+  const filteredGoalies = goalies.map(gl => projectGoalie(gl)).filter(Boolean).filter(gl => gl.gp >= psMinGP);
 
   const sortVal = p => {
     if (psSortCol === "name") return p.name.toLowerCase();
+    if (psSortCol === "ppg")  return p.gp > 0 ? p.pts / p.gp : 0;
     return p[psSortCol] ?? 0;
   };
   const sorted = [...filtered].sort((a, b) => {
@@ -1514,145 +1815,454 @@ function renderPlayerStatsTable(games) {
   document.getElementById("ps-total-shutouts").textContent = shutoutsTracked;
   document.getElementById("ps-loaded-content").style.display = "";
 
-  // Skater table header
-  const colLabels = { gp: "GP", g: "G", a: "A", pts: "PTS", stars: "★", star1: "1st", star2: "2nd", star3: "3rd" };
+  // Whether any skater game-detail rows are currently showing
+  const anySkaterGameExp = [...psGameExpanded].some(k => !k.startsWith("g-"));
+
+  // Helper: sort a gamesList by date
+  const sortedGameList = list =>
+    [...(list || [])].sort((a, b) => {
+      const cmp = a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+      return psGameSortDir === "asc" ? cmp : -cmp;
+    });
+
+  // Skater table header — Date col always in DOM, hidden via CSS when nothing is expanded
+  // While a subsection is open, headers show the opp-sort state; otherwise show main sort state.
+  const colLabels = { gp: "GP", g: "G", a: "A", pts: "PTS", ppg: "PPG", stars: "★", star1: "1st", star2: "2nd", star3: "3rd" };
+  const skColCount = 11;
+  const skDispCol = anySkaterGameExp ? psOppSortCol : psSortCol;
+  const skDispDir = anySkaterGameExp ? psOppSortDir : psSortDir;
   document.querySelector("#ps-skaters-table thead tr").innerHTML = `
-    <th class="sortable ps-sort-th${psSortCol==="name"?" ps-sort-active":""}" data-ps-col="name">
-      Player${psSortCol==="name"?(psSortDir==="asc"?" ↑":" ↓"):""}
+    <th class="sortable ps-sort-th${skDispCol==="name"?" ps-sort-active":""}" data-ps-col="name">
+      Player${skDispCol==="name"?(skDispDir==="asc"?" ↑":" ↓"):""}
     </th>
     <th>Team</th>
-    ${["gp","g","a","pts","stars","star1","star2","star3"].map(c =>
-      `<th class="sortable ps-sort-th${psSortCol===c?" ps-sort-active":""}" data-ps-col="${c}">${colLabels[c]}${psSortCol===c?(psSortDir==="asc"?" ↑":" ↓"):""}</th>`
+    ${["gp","g","a","pts","ppg","stars","star1","star2","star3"].map(c =>
+      `<th class="sortable ps-sort-th${skDispCol===c?" ps-sort-active":""}" data-ps-col="${c}">${colLabels[c]}${skDispCol===c?(skDispDir==="asc"?" ↑":" ↓"):""}</th>`
     ).join("")}`;
 
-  // Skater table rows
+  // ── Skater rows ───────────────────────────────────────────────
+  // oppData = { opp, gp, g, a, pts, stars, star1, star2, star3 } aggregated across all games vs that opponent
+  const skaterOppRow = (oppData) => {
+    const star = oppData.stars ? `<span class="ps-stars-badge">★ ${oppData.stars}</span>` : "—";
+    const ppg  = oppData.gp > 0 ? (oppData.pts / oppData.gp).toFixed(2) : "—";
+    return `<tr class="ps-game-detail-row">
+      <td></td>
+      <td><span class="dim">vs. ${oppData.opp}</span>${teamLogoByAbbr(oppData.opp)}</td>
+      <td>${oppData.gp}</td>
+      <td>${oppData.g  || "—"}</td><td>${oppData.a || "—"}</td>
+      <td>${oppData.pts || "—"}</td>
+      <td>${ppg}</td>
+      <td>${star}</td>
+      <td>${oppData.star1 || "—"}</td>
+      <td>${oppData.star2 || "—"}</td>
+      <td>${oppData.star3 || "—"}</td>
+    </tr>`;
+  };
+
   const rows = [];
   for (const p of sorted) {
-    const isExp  = psExpanded.has(p.name);
-    const teamCell = p.isMulti
+    const isTeamExp = p.isMulti && psExpanded.has(p.name);
+    const singleKey = `${p.name}|${p.abbr}`;
+    const isGameExp = !p.isMulti && psGameExpanded.has(singleKey);
+    const isAnyExp  = isTeamExp || isGameExp;
+    const teamCell  = p.isMulti
       ? `${teamLogoByAbbr("NHL")}<span class="dim">MULTI</span>`
       : `${teamLogoByAbbr(p.abbr)}<span class="dim">${p.abbr || "—"}</span>`;
-    const expandIcon = p.isMulti ? `<span class="ps-expand-icon">▶</span>` : `<span style="display:inline-block;width:1rem"></span>`;
-    rows.push(`<tr class="${p.isMulti ? `ps-multi-row${isExp?" ps-expanded":""}` : ""}" data-ps-player="${encodeURIComponent(p.name)}">
-      <td>${expandIcon}<strong>${makePlayerLink(p.name)}</strong></td>
+
+    rows.push(`<tr class="ps-player-row${isAnyExp ? " ps-row-open" : ""}"
+        data-ps-player="${encodeURIComponent(p.name)}"
+        data-ps-abbr="${encodeURIComponent(p.abbr || "")}"
+        data-ps-multi="${p.isMulti}"
+        style="cursor:pointer">
+      <td><span class="ps-expand-icon">▶</span><strong>${makePlayerLink(p.name)}</strong></td>
       <td>${teamCell}</td>
       <td>${p.gp}</td><td>${p.g}</td><td>${p.a}</td>
       <td>${p.pts}</td>
+      <td>${p.gp > 0 ? (p.pts / p.gp).toFixed(2) : "—"}</td>
       <td>${p.stars ? `<span class="ps-stars-badge">★ ${p.stars}</span>` : "—"}</td>
       <td>${p.star1 || "—"}</td><td>${p.star2 || "—"}</td><td>${p.star3 || "—"}</td>
     </tr>`);
-    if (p.isMulti && isExp) {
+
+    if (p.isMulti && isTeamExp) {
       for (const t of p.perTeam) {
-        rows.push(`<tr class="ps-sub-row">
-          <td></td>
+        const teamKey     = `${p.name}|${t.abbr}`;
+        const isTeamGames = psGameExpanded.has(teamKey);
+        rows.push(`<tr class="ps-sub-row ps-team-sub-row${isTeamGames ? " ps-row-open" : ""}"
+            data-ps-player="${encodeURIComponent(p.name)}"
+            data-ps-abbr="${encodeURIComponent(t.abbr)}"
+            style="cursor:pointer">
+          <td><span class="ps-expand-icon">▶</span></td>
           <td>${teamLogoByAbbr(t.abbr)}<span class="dim">${t.abbr}</span></td>
           <td>${t.gp}</td><td>${t.g}</td><td>${t.a}</td>
           <td style="color:var(--gold);font-family:var(--font-d);font-weight:700">${t.pts}</td>
+          <td>${t.gp > 0 ? (t.pts / t.gp).toFixed(2) : "—"}</td>
           <td>${t.stars ? `<span class="ps-stars-badge">★ ${t.stars}</span>` : "—"}</td>
           <td>${t.star1 || "—"}</td><td>${t.star2 || "—"}</td><td>${t.star3 || "—"}</td>
         </tr>`);
+        if (isTeamGames) {
+          for (const od of groupByOpponent(t.gamesList)) rows.push(skaterOppRow(od));
+        }
       }
+    } else if (!p.isMulti && isGameExp) {
+      for (const od of groupByOpponent(p.perTeam[0]?.gamesList)) rows.push(skaterOppRow(od));
     }
   }
   document.querySelector("#ps-skaters-table tbody").innerHTML = rows.length
     ? rows.join("")
-    : `<tr><td colspan="10" class="dim" style="text-align:center;padding:1.5rem">No skater data for selected filter.</td></tr>`;
+    : `<tr><td colspan="${skColCount}" class="dim" style="text-align:center;padding:1.5rem">No skater data for selected filter.</td></tr>`;
 
   // Skater sort header click
+  // When a subsection is open → sort the opponent rows; otherwise sort the main player list.
   document.querySelectorAll("#ps-skaters-table .ps-sort-th").forEach(th => {
     th.addEventListener("click", () => {
       const col = th.dataset.psCol;
-      psSortDir = psSortCol === col && psSortDir === "desc" ? "asc" : "desc";
-      psSortCol = col;
+      if (anySkaterGameExp) {
+        psOppSortDir = psOppSortCol === col && psOppSortDir === "desc" ? "asc" : "desc";
+        psOppSortCol = col;
+      } else {
+        psSortDir = psSortCol === col && psSortDir === "desc" ? "asc" : "desc";
+        psSortCol = col;
+      }
+      renderPlayerStatsTable(games);
+    });
+  });
+  // (Date-sort removed — detail rows now group by opponent, not individual dates)
+
+  // Skater row expand/collapse — exclusive: only one game list visible at a time
+  // (Goalie rows also carry ps-player-row class; skip them here — handled by [data-ps-goalie])
+  document.querySelectorAll(".ps-player-row").forEach(row => {
+    if (row.dataset.psGoalie !== undefined) return; // skip goalie rows
+    row.addEventListener("click", e => {
+      if (e.target.closest(".ps-player-link")) return;
+      const name    = decodeURIComponent(row.dataset.psPlayer || "");
+      const abbr    = decodeURIComponent(row.dataset.psAbbr   || "");
+      const isMulti = row.dataset.psMulti === "true";
+      if (isMulti) {
+        if (psExpanded.has(name)) {
+          // Closing multi-team player: collapse team breakdown and any open game lists
+          psExpanded.delete(name);
+          const hadGames = [...psGameExpanded].some(k => !k.startsWith("g-"));
+          for (const k of [...psGameExpanded]) { if (k.startsWith(`${name}|`)) psGameExpanded.delete(k); }
+          // If no skater game rows remain, restore frozen main sort
+          const stillAny = [...psGameExpanded].some(k => !k.startsWith("g-"));
+          if (hadGames && !stillAny && psFrozenSortCol !== null) {
+            psSortCol = psFrozenSortCol; psSortDir = psFrozenSortDir;
+            psFrozenSortCol = null;      psFrozenSortDir = null;
+          }
+        } else {
+          // Opening: close everything else, no opp rows shown yet → no freeze needed
+          psExpanded.clear();
+          psGameExpanded.clear();
+          // If there was a frozen sort left over, restore it before opening
+          if (psFrozenSortCol !== null) {
+            psSortCol = psFrozenSortCol; psSortDir = psFrozenSortDir;
+            psFrozenSortCol = null;      psFrozenSortDir = null;
+          }
+          psExpanded.add(name);
+        }
+      } else {
+        const key = `${name}|${abbr}`;
+        if (psGameExpanded.has(key)) {
+          // Closing single-team: restore frozen main sort
+          psGameExpanded.delete(key);
+          if (psFrozenSortCol !== null) {
+            psSortCol = psFrozenSortCol; psSortDir = psFrozenSortDir;
+            psFrozenSortCol = null;      psFrozenSortDir = null;
+          }
+        } else {
+          // Opening: freeze current main sort and init opp sort to match
+          psExpanded.clear();
+          psGameExpanded.clear();
+          psFrozenSortCol = psSortCol;
+          psFrozenSortDir = psSortDir;
+          psOppSortCol    = psSortCol;
+          psOppSortDir    = psSortDir;
+          psGameExpanded.add(key);
+        }
+      }
       renderPlayerStatsTable(games);
     });
   });
 
-  // Multi-team expand click
-  document.querySelectorAll(".ps-multi-row").forEach(row => {
+  // Team sub-row expand/collapse → exclusive game list
+  document.querySelectorAll(".ps-team-sub-row").forEach(row => {
+    if (row.dataset.psGoalieTeamSub) return; // goalie sub-rows handled separately
     row.addEventListener("click", () => {
       const name = decodeURIComponent(row.dataset.psPlayer || "");
-      psExpanded.has(name) ? psExpanded.delete(name) : psExpanded.add(name);
+      const abbr = decodeURIComponent(row.dataset.psAbbr   || "");
+      const key  = `${name}|${abbr}`;
+      if (psGameExpanded.has(key)) {
+        // Closing: restore frozen main sort
+        psGameExpanded.delete(key);
+        const stillAny = [...psGameExpanded].some(k => !k.startsWith("g-"));
+        if (!stillAny && psFrozenSortCol !== null) {
+          psSortCol = psFrozenSortCol; psSortDir = psFrozenSortDir;
+          psFrozenSortCol = null;      psFrozenSortDir = null;
+        }
+      } else {
+        // Closing any other open skater game list first; freeze main sort
+        psGameExpanded.clear();
+        if (psFrozenSortCol === null) {
+          psFrozenSortCol = psSortCol;
+          psFrozenSortDir = psSortDir;
+          psOppSortCol    = psSortCol;
+          psOppSortDir    = psSortDir;
+        }
+        psGameExpanded.add(key);
+      }
       renderPlayerStatsTable(games);
     });
   });
 
-  // Goalie table header — dynamic, sortable
-  const gColLabels = { gp:"GP", w:"W", l:"L", otl:"OTL", so:"SO", pts:"PTS", stars:"★", star1:"1st", star2:"2nd", star3:"3rd" };
+  // Whether any goalie game-detail rows are currently showing
+  const anyGoalieGameExp = [...psGameExpanded].some(k => k.startsWith("g-"));
+
+  // ── Goalie table header ────────────────────────────────────────
+  // While a goalie subsection is open, headers show the opp-sort state; otherwise main sort.
+  const gColLabels = { gp:"GP", w:"W", l:"L", otl:"OTL", so:"SO", svp:"SV%", pts:"PTS", stars:"★", star1:"1st", star2:"2nd", star3:"3rd" };
+  const glColCount = 13;
+  const glDispCol = anyGoalieGameExp ? psGoalieOppSortCol : psGoalieSortCol;
+  const glDispDir = anyGoalieGameExp ? psGoalieOppSortDir : psGoalieSortDir;
   document.querySelector("#ps-goalies-table thead tr").innerHTML = `
-    <th class="sortable ps-sort-th${psGoalieSortCol==="name"?" ps-sort-active":""}" data-pg-col="name">
-      Player${psGoalieSortCol==="name"?(psGoalieSortDir==="asc"?" ↑":" ↓"):""}
+    <th class="sortable ps-sort-th${glDispCol==="name"?" ps-sort-active":""}" data-pg-col="name">
+      Player${glDispCol==="name"?(glDispDir==="asc"?" ↑":" ↓"):""}
     </th>
     <th>Team</th>
-    ${["gp","w","l","otl","so","pts","stars","star1","star2","star3"].map(c =>
-      `<th class="sortable ps-sort-th${psGoalieSortCol===c?" ps-sort-active":""}" data-pg-col="${c}">${gColLabels[c]}${psGoalieSortCol===c?(psGoalieSortDir==="asc"?" ↑":" ↓"):""}</th>`
+    ${["gp","w","l","otl","so","svp","pts","stars","star1","star2","star3"].map(c =>
+      `<th class="sortable ps-sort-th${glDispCol===c?" ps-sort-active":""}" data-pg-col="${c}">${gColLabels[c]}${glDispCol===c?(glDispDir==="asc"?" ↑":" ↓"):""}</th>`
     ).join("")}`;
 
-  const gSortVal = gl => psGoalieSortCol === "name" ? gl.name.toLowerCase() : (gl[psGoalieSortCol] ?? 0);
+  const gSortVal = gl => {
+    if (psGoalieSortCol === "name") return gl.name.toLowerCase();
+    if (psGoalieSortCol === "svp")  return gl.sa > 0 ? gl.saves / gl.sa : 0;
+    return gl[psGoalieSortCol] ?? 0;
+  };
   const sortedGoalies = [...filteredGoalies].sort((a, b) => {
     const av = gSortVal(a), bv = gSortVal(b);
     const cmp = typeof av === "string" ? av.localeCompare(bv) : bv - av;
     return psGoalieSortDir === "asc" ? -cmp : cmp;
   });
 
-  // Goalie table rows — multi-team support mirrors skater logic
+  // ── Goalie rows ────────────────────────────────────────────────
+  // oppData = { opp, gp, w, l, otl, so, pts, stars, star1, star2, star3 } aggregated vs that opponent
+  const goalieOppRow = (oppData) => {
+    const star = oppData.stars ? `<span class="ps-stars-badge">★ ${oppData.stars}</span>` : "—";
+    const svp  = oppData.sa > 0 ? (oppData.saves / oppData.sa).toFixed(3).replace(/^0/, "") : "—";
+    return `<tr class="ps-game-detail-row">
+      <td></td>
+      <td><span class="dim">vs. ${oppData.opp}</span>${teamLogoByAbbr(oppData.opp)}</td>
+      <td>${oppData.gp}</td>
+      <td>${oppData.w   || "—"}</td>
+      <td>${oppData.l   || "—"}</td>
+      <td>${oppData.otl || "—"}</td>
+      <td>${oppData.so  || "—"}</td>
+      <td>${svp}</td>
+      <td>${oppData.pts || "—"}</td>
+      <td>${star}</td>
+      <td>${oppData.star1 || "—"}</td>
+      <td>${oppData.star2 || "—"}</td>
+      <td>${oppData.star3 || "—"}</td>
+    </tr>`;
+  };
+
   const goalieRows = [];
   for (const gl of sortedGoalies) {
-    const key   = `g-${gl.name}`;
-    const isExp = psExpanded.has(key);
-    const teamCell  = gl.isMulti
+    const glKey      = `g-${gl.name}`;
+    const isTeamExp  = gl.isMulti && psExpanded.has(glKey);
+    const singleGlKey = `g-${gl.name}|${gl.team}`;
+    const isGameExp  = !gl.isMulti && psGameExpanded.has(singleGlKey);
+    const isAnyExp   = isTeamExp || isGameExp;
+    const teamCell   = gl.isMulti
       ? `${teamLogoByAbbr("NHL")}<span class="dim">MULTI</span>`
       : `${teamLogoByAbbr(gl.team)}<span class="dim">${gl.team || "—"}</span>`;
-    const expandIcon = gl.isMulti
-      ? `<span class="ps-expand-icon">▶</span>`
-      : `<span style="display:inline-block;width:1rem"></span>`;
-    goalieRows.push(`<tr class="${gl.isMulti ? `ps-multi-row${isExp ? " ps-expanded" : ""}` : ""}" data-ps-goalie="${encodeURIComponent(gl.name)}">
-      <td>${expandIcon}<strong>${makePlayerLink(gl.name)}</strong></td>
+
+    goalieRows.push(`<tr class="ps-player-row${isAnyExp ? " ps-row-open" : ""}"
+        data-ps-goalie="${encodeURIComponent(gl.name)}"
+        data-ps-goalie-team="${encodeURIComponent(gl.team || "")}"
+        data-ps-goalie-multi="${gl.isMulti}"
+        style="cursor:pointer">
+      <td><span class="ps-expand-icon">▶</span><strong>${makePlayerLink(gl.name)}</strong></td>
       <td>${teamCell}</td>
       <td>${gl.gp}</td>
       <td>${gl.w}</td><td>${gl.l}</td><td>${gl.otl}</td>
       <td>${gl.so || "—"}</td>
+      <td>${gl.sa > 0 ? (gl.saves / gl.sa).toFixed(3).replace(/^0/, "") : "—"}</td>
       <td>${gl.pts || "—"}</td>
       <td>${gl.stars ? `<span class="ps-stars-badge">★ ${gl.stars}</span>` : "—"}</td>
       <td>${gl.star1 || "—"}</td><td>${gl.star2 || "—"}</td><td>${gl.star3 || "—"}</td>
     </tr>`);
-    if (gl.isMulti && isExp) {
+
+    if (gl.isMulti && isTeamExp) {
       for (const t of gl.perTeam) {
-        goalieRows.push(`<tr class="ps-sub-row">
-          <td></td>
+        const teamKey     = `g-${gl.name}|${t.abbr}`;
+        const isTeamGames = psGameExpanded.has(teamKey);
+        goalieRows.push(`<tr class="ps-sub-row ps-team-sub-row${isTeamGames ? " ps-row-open" : ""}"
+            data-ps-goalie="${encodeURIComponent(gl.name)}"
+            data-ps-abbr="${encodeURIComponent(t.abbr)}"
+            data-ps-goalie-team-sub="true"
+            style="cursor:pointer">
+          <td><span class="ps-expand-icon">▶</span></td>
           <td>${teamLogoByAbbr(t.abbr)}<span class="dim">${t.abbr}</span></td>
           <td>${t.gp}</td>
           <td>${t.w}</td><td>${t.l}</td><td>${t.otl}</td>
           <td>${t.so || "—"}</td>
+          <td>${t.sa > 0 ? (t.saves / t.sa).toFixed(3).replace(/^0/, "") : "—"}</td>
           <td>${t.pts || "—"}</td>
           <td>${t.stars ? `<span class="ps-stars-badge">★ ${t.stars}</span>` : "—"}</td>
           <td>${t.star1 || "—"}</td><td>${t.star2 || "—"}</td><td>${t.star3 || "—"}</td>
         </tr>`);
+        if (isTeamGames) {
+          for (const od of groupGoalieByOpponent(t.gamesList)) goalieRows.push(goalieOppRow(od));
+        }
       }
+    } else if (!gl.isMulti && isGameExp) {
+      for (const od of groupGoalieByOpponent(gl.perTeam[0]?.gamesList)) goalieRows.push(goalieOppRow(od));
     }
   }
   document.querySelector("#ps-goalies-table tbody").innerHTML = goalieRows.length
     ? goalieRows.join("")
-    : `<tr><td colspan="12" class="dim" style="text-align:center;padding:1.5rem">No goalie data yet.</td></tr>`;
+    : `<tr><td colspan="${glColCount}" class="dim" style="text-align:center;padding:1.5rem">No goalie data yet.</td></tr>`;
 
-  // Goalie multi-team expand click
+  // Goalie row expand/collapse — exclusive game list
   document.querySelectorAll("[data-ps-goalie]").forEach(row => {
+    if (row.dataset.psGoalieTeamSub) return;
+    row.addEventListener("click", e => {
+      if (e.target.closest(".ps-player-link")) return;
+      const name    = decodeURIComponent(row.dataset.psGoalie     || "");
+      const team    = decodeURIComponent(row.dataset.psGoalieTeam || "");
+      const isMulti = row.dataset.psGoalieMulti === "true";
+      const glKey   = `g-${name}`;
+      if (isMulti) {
+        if (psExpanded.has(glKey)) {
+          // Closing multi-team goalie: collapse and check if we should restore
+          psExpanded.delete(glKey);
+          const hadGames = [...psGameExpanded].some(k => k.startsWith("g-"));
+          for (const k of [...psGameExpanded]) { if (k.startsWith(`g-${name}|`)) psGameExpanded.delete(k); }
+          const stillAny = [...psGameExpanded].some(k => k.startsWith("g-"));
+          if (hadGames && !stillAny && psGoalieFrozenSortCol !== null) {
+            psGoalieSortCol = psGoalieFrozenSortCol; psGoalieSortDir = psGoalieFrozenSortDir;
+            psGoalieFrozenSortCol = null;            psGoalieFrozenSortDir = null;
+          }
+        } else {
+          // Opening multi-team: no opp rows yet → no freeze; clear leftovers
+          psExpanded.clear();
+          psGameExpanded.clear();
+          if (psGoalieFrozenSortCol !== null) {
+            psGoalieSortCol = psGoalieFrozenSortCol; psGoalieSortDir = psGoalieFrozenSortDir;
+            psGoalieFrozenSortCol = null;            psGoalieFrozenSortDir = null;
+          }
+          psExpanded.add(glKey);
+        }
+      } else {
+        const key = `g-${name}|${team}`;
+        if (psGameExpanded.has(key)) {
+          // Closing: restore frozen goalie sort
+          psGameExpanded.delete(key);
+          if (psGoalieFrozenSortCol !== null) {
+            psGoalieSortCol = psGoalieFrozenSortCol; psGoalieSortDir = psGoalieFrozenSortDir;
+            psGoalieFrozenSortCol = null;            psGoalieFrozenSortDir = null;
+          }
+        } else {
+          // Opening: freeze current goalie sort and init opp sort to match
+          psExpanded.clear();
+          psGameExpanded.clear();
+          psGoalieFrozenSortCol = psGoalieSortCol;
+          psGoalieFrozenSortDir = psGoalieSortDir;
+          psGoalieOppSortCol    = psGoalieSortCol;
+          psGoalieOppSortDir    = psGoalieSortDir;
+          psGameExpanded.add(key);
+        }
+      }
+      renderPlayerStatsTable(games);
+    });
+  });
+
+  // Goalie team sub-row expand/collapse → exclusive game list
+  document.querySelectorAll("[data-ps-goalie-team-sub]").forEach(row => {
     row.addEventListener("click", () => {
-      const key = `g-${decodeURIComponent(row.dataset.psGoalie || "")}`;
-      psExpanded.has(key) ? psExpanded.delete(key) : psExpanded.add(key);
+      const name = decodeURIComponent(row.dataset.psGoalie || "");
+      const abbr = decodeURIComponent(row.dataset.psAbbr   || "");
+      const key  = `g-${name}|${abbr}`;
+      if (psGameExpanded.has(key)) {
+        // Closing: restore frozen goalie sort
+        psGameExpanded.delete(key);
+        const stillAny = [...psGameExpanded].some(k => k.startsWith("g-"));
+        if (!stillAny && psGoalieFrozenSortCol !== null) {
+          psGoalieSortCol = psGoalieFrozenSortCol; psGoalieSortDir = psGoalieFrozenSortDir;
+          psGoalieFrozenSortCol = null;            psGoalieFrozenSortDir = null;
+        }
+      } else {
+        // Closing any other open goalie game list; freeze goalie sort
+        psGameExpanded.clear();
+        if (psGoalieFrozenSortCol === null) {
+          psGoalieFrozenSortCol = psGoalieSortCol;
+          psGoalieFrozenSortDir = psGoalieSortDir;
+          psGoalieOppSortCol    = psGoalieSortCol;
+          psGoalieOppSortDir    = psGoalieSortDir;
+        }
+        psGameExpanded.add(key);
+      }
       renderPlayerStatsTable(games);
     });
   });
 
   // Goalie sort header click
+  // When a goalie subsection is open → sort the opponent rows; otherwise sort main goalie list.
   document.querySelectorAll("#ps-goalies-table .ps-sort-th").forEach(th => {
     th.addEventListener("click", () => {
       const col = th.dataset.pgCol;
-      psGoalieSortDir = psGoalieSortCol === col && psGoalieSortDir === "desc" ? "asc" : "desc";
-      psGoalieSortCol = col;
+      if (anyGoalieGameExp) {
+        psGoalieOppSortDir = psGoalieOppSortCol === col && psGoalieOppSortDir === "desc" ? "asc" : "desc";
+        psGoalieOppSortCol = col;
+      } else {
+        psGoalieSortDir = psGoalieSortCol === col && psGoalieSortDir === "desc" ? "asc" : "desc";
+        psGoalieSortCol = col;
+      }
       renderPlayerStatsTable(games);
     });
   });
+  // (Date-sort removed — goalie detail rows now group by opponent)
+}
+
+function extractEspnIdsFromCache() {
+  for (const cached of Object.values(espnCache)) {
+    for (const st of (cached.stars || [])) {
+      if (st?.name && st?.headshot) {
+        const m = st.headshot.match(/\/full\/(\d+)\.png/);
+        if (m) espnAthleteIds[st.name] = m[1];
+      }
+    }
+  }
+}
+
+// Pre-fetch ESPN athlete IDs for every player not already resolved.
+// Runs once in the background after stats load so all first-clicks are
+// synchronous (popup-safe).
+// NOTE: We deliberately do NOT add players to espnNoLink here even when the
+// server returns 404. The server's background athlete scan may still be
+// running (it takes a few minutes), so a 404 now is often a false negative.
+// espnNoLink is only populated on the interactive click path where we know
+// the lookup has had every chance to succeed.
+async function prefetchAllEspnIds(names) {
+  const toFetch = [...new Set(names)].filter(n => n && !espnAthleteIds[n] && !espnNoLink.has(n));
+  if (!toFetch.length) return;
+
+  const CONCURRENCY = 4;
+  for (let i = 0; i < toFetch.length; i += CONCURRENCY) {
+    await Promise.all(
+      toFetch.slice(i, i + CONCURRENCY).map(async name => {
+        try {
+          const r = await fetch(`/.netlify/functions/espn-player?name=${encodeURIComponent(name)}`);
+          if (!r.ok) return; // 404 / server error — leave unresolved, do NOT mark as no-link
+          const j = await r.json();
+          if (j.id) espnAthleteIds[name] = j.id;
+          // No else — leave unfound players as "unknown"; click path handles them
+        } catch (_) {
+          // Network error — leave unresolved
+        }
+      })
+    );
+  }
 }
 
 async function fetchAllPlayerStats(games) {
@@ -1682,12 +2292,24 @@ async function fetchAllPlayerStats(games) {
   playerStatsLoading = false;
   playerStatsFetched = true;
   if (statusEl) statusEl.innerHTML = "";
+  extractEspnIdsFromCache();
   renderPlayerStatsTable(games);
+
+  // Pre-fetch ESPN IDs for every player not covered by headshots.
+  // This ensures first-clicks are synchronous (popup-safe). Fire & forget.
+  if (!espnPrefetchDone) {
+    espnPrefetchDone = true;
+    const allG = ALL_GAMES.filter(g => g.seasonType?.toLowerCase() !== "special");
+    prefetchAllEspnIds([
+      ...aggregatePlayerStats(allG).map(p => p.name),
+      ...aggregateGoalieStats(allG).map(g => g.name),
+    ]);
+  }
 }
 
 function renderPlayerStats(games) {
   const filtersEl = document.getElementById("ps-filters");
-  if (filtersEl) filtersEl.innerHTML = filterPillsHTML();
+  if (filtersEl) filtersEl.innerHTML = filterPillsHTML(false); // no Opponent filter on PS tab
   if (!document.getElementById("tab-playerstats")?.classList.contains("active")) return;
   setupPsTeamDropdown();
   if (playerStatsFetched) { renderPlayerStatsTable(games); return; }
@@ -1695,19 +2317,46 @@ function renderPlayerStats(games) {
   fetchAllPlayerStats(games);
 }
 
-// Player name links → ESPN stats page (lazy ID lookup)
+// Player name links → ESPN stats page (use cached ID first, API fallback)
 document.addEventListener("click", async e => {
   const el = e.target.closest(".ps-player-link");
-  if (!el || el.classList.contains("ps-link-loading")) return;
+  if (!el || el.classList.contains("ps-link-loading") || el.classList.contains("ps-link-no-espn")) return;
   const name = decodeURIComponent(el.dataset.pname || "");
   if (!name) return;
+
+  // URL already resolved from a previous lookup → open synchronously (popup-safe)
   if (el.dataset.espnUrl) { window.open(el.dataset.espnUrl, "_blank"); return; }
+
+  // Fast path: ID known (from headshots or pre-fetch) → build URL and open synchronously
+  const knownId = espnAthleteIds[name];
+  if (knownId) {
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    el.dataset.espnUrl = `https://www.espn.com/nhl/player/stats/_/id/${knownId}/${slug}`;
+    window.open(el.dataset.espnUrl, "_blank");
+    return;
+  }
+
+  // Slow path: pre-fetch hasn't resolved this player yet — do a one-off lookup.
+  // NOTE: window.open after await is blocked by popup blockers, so we store the
+  // URL and prompt the user to click once more (second click hits the fast path).
   el.classList.add("ps-link-loading");
+  el.title = "Looking up ESPN profile…";
   try {
     const r = await fetch(`/.netlify/functions/espn-player?name=${encodeURIComponent(name)}`);
-    const j = await r.json();
-    if (j.url) { el.dataset.espnUrl = j.url; window.open(j.url, "_blank"); }
-  } catch (_) {}
+    const j = r.ok ? await r.json() : {};
+    if (j.id) espnAthleteIds[name] = j.id;
+    if (j.url) {
+      el.dataset.espnUrl = j.url;
+      el.title = "Click again to open ESPN stats ↗";
+      el.classList.add("ps-link-ready");
+    } else {
+      espnNoLink.add(name);
+      el.classList.add("ps-link-no-espn");
+      el.title = "No ESPN profile found for this player";
+    }
+  } catch (_) {
+    el.title = "Couldn't reach ESPN — try again";
+  }
   el.classList.remove("ps-link-loading");
 });
 
@@ -1718,7 +2367,7 @@ document.addEventListener("click", e => {
   document.querySelectorAll("[data-ps-pos]").forEach(b => b.classList.remove("active"));
   btn.classList.add("active");
   psPosition = btn.dataset.psPos;
-  renderPlayerStatsTable(filteredGames(false));
+  renderPlayerStatsTable(filteredGames(false, false));
 });
 
 // Toggle team dropdown open/close
@@ -1753,7 +2402,7 @@ document.addEventListener("click", e => {
   const panel = document.getElementById("ps-team-panel");
   if (wrap)  wrap.classList.remove("dd-open");
   if (panel) panel.classList.remove("open");
-  renderPlayerStatsTable(filteredGames(false));
+  renderPlayerStatsTable(filteredGames(false, false));
 });
 
 // Individual team checkbox changes
@@ -1764,7 +2413,17 @@ document.addEventListener("change", e => {
   // Deactivate presets when specific teams are chosen
   psFilter = "all";
   document.querySelectorAll("[data-ps-preset]").forEach(b => b.classList.remove("active"));
-  renderPlayerStatsTable(filteredGames(false));
+  renderPlayerStatsTable(filteredGames(false, false));
+});
+
+// Min GP filter — updates as the user types; highlights the input when filter is active (> 1)
+document.addEventListener("input", e => {
+  const inp = e.target.closest("#ps-min-gp");
+  if (!inp) return;
+  const v = parseInt(inp.value, 10);
+  psMinGP = isNaN(v) || v < 1 ? 1 : v;
+  inp.classList.toggle("gp-filter-active", psMinGP > 1);
+  renderPlayerStatsTable(filteredGames(false, false));
 });
 
 function renderMap(games) {

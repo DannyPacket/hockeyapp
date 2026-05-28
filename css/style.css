@@ -54,9 +54,11 @@ main { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; }
 .hero-label { font-family: var(--font-d); font-size: 0.85rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 0.5rem; }
 
 /* ── FILTERS ── */
-.filters { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.5rem; align-items: center; justify-content: center; }
-.filter-label { font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); margin-right: 0.25rem; }
-.pill { font-family: var(--font-d); font-size: 0.85rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); padding: 0.4rem 1rem; border-radius: 999px; cursor: pointer; transition: all 0.15s; }
+.filters { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 1.5rem; align-items: center; justify-content: center; }
+.filter-label { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); white-space: nowrap; }
+/* Thin vertical divider between filter groups */
+.filter-sep { width: 1px; height: 1.2em; background: var(--border); align-self: center; margin: 0 0.25rem; flex-shrink: 0; }
+.pill { font-family: var(--font-d); font-size: 0.8rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); padding: 0.32rem 0.75rem; border-radius: 999px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
 .pill:hover { border-color: var(--gold-dim); color: var(--text); }
 .pill.active { background: var(--gold); color: var(--black); border-color: var(--gold); }
 
@@ -381,6 +383,45 @@ tbody td { padding: 0.65rem 0.8rem; color: var(--text); }
 }
 .season-dd-all { border-bottom: none; }
 
+/* ── OPPONENT FILTER DROPDOWN (reuses season-dd panel/item styles) ── */
+.opp-dd-wrap { position: relative; }
+.opp-dd-wrap.dd-open .opp-dd-trigger.pill .chevron { transform: rotate(180deg); }
+.opp-dd-panel {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10000;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.4rem;
+  min-width: 180px;
+  max-height: 320px;
+  overflow-y: auto;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.6);
+  animation: slideIn 0.15s ease;
+}
+.opp-dd-panel.open { display: block; }
+.opp-dd-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--font-d);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  transition: background 0.1s, color 0.1s;
+  user-select: none;
+}
+.opp-dd-item:hover { background: var(--surface3); color: var(--text); }
+.opp-dd-item input[type="checkbox"] { accent-color: var(--gold); width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
+.opp-dd-item .team-logo { width: 18px; height: 18px; object-fit: contain; flex-shrink: 0; }
+
 /* ── ARENA MAP ── */
 #arena-map {
   height: 560px;
@@ -548,6 +589,30 @@ tbody td { padding: 0.65rem 0.8rem; color: var(--text); }
   margin-bottom: 1.5rem;
 }
 
+/* Min GP number input — styled to match pills */
+.ps-min-gp-input {
+  width: 54px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.32rem 0.5rem;
+  font-size: 0.85rem;
+  font-family: var(--font-d);
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  /* hide browser spin arrows */
+  -moz-appearance: textfield;
+}
+.ps-min-gp-input::-webkit-outer-spin-button,
+.ps-min-gp-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.ps-min-gp-input:focus { outline: none; border-color: var(--gold); color: var(--text); }
+.ps-min-gp-input:hover { border-color: var(--gold-dim); }
+/* Show "active" gold tint when value is above 1 (filter is active) */
+.ps-min-gp-input.gp-filter-active { border-color: var(--gold); color: var(--gold); background: transparent; }
+
 /* Team dropdown */
 .ps-team-dropdown { position: relative; }
 .ps-team-dropdown.dd-open .ps-team-btn .chevron { transform: rotate(180deg); }
@@ -623,7 +688,14 @@ tbody td { padding: 0.65rem 0.8rem; color: var(--text); }
   .ps-tables-grid { grid-template-columns: 1fr; }
 }
 
-/* Skater table column alignment */
+/* Skater table column alignment
+   Col layout (Date always in DOM): 1=Player 2=Date 3=Team 4=GP 5=G 6=A 7=PTS 8=★ 9=1st 10=2nd 11=3rd */
+#ps-skaters-table { table-layout: fixed; width: 100%; }
+#ps-skaters-table th:first-child,
+#ps-skaters-table td:first-child { width: var(--ps-player-col-w, 160px); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Team column — wide enough for "vs. WPG 🏒" on one line */
+#ps-skaters-table th:nth-child(2),
+#ps-skaters-table td:nth-child(2) { width: 120px; white-space: nowrap; overflow: hidden; }
 #ps-skaters-table thead th { cursor: default; }
 #ps-skaters-table thead th.sortable { cursor: pointer; }
 #ps-skaters-table thead th.ps-sort-active { color: var(--gold); }
@@ -637,7 +709,14 @@ tbody td { padding: 0.65rem 0.8rem; color: var(--text); }
 }
 #ps-skaters-table td:nth-child(6) { color: var(--gold); }
 
-/* Goalie table column alignment */
+/* Goalie table column alignment
+   Col layout: 1=Player 2=Team 3=GP 4=W 5=L 6=OTL 7=SO 8=SV% 9=PTS 10=★ 11=1st 12=2nd 13=3rd */
+#ps-goalies-table { table-layout: fixed; width: 100%; }
+#ps-goalies-table th:first-child,
+#ps-goalies-table td:first-child { width: var(--ps-player-col-w, 160px); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Team column — wide enough for "vs. WPG 🏒" on one line */
+#ps-goalies-table th:nth-child(2),
+#ps-goalies-table td:nth-child(2) { width: 120px; white-space: nowrap; overflow: hidden; }
 #ps-goalies-table td:nth-child(n+3) {
   text-align: center;
   font-family: var(--font-d);
@@ -649,6 +728,7 @@ tbody td { padding: 0.65rem 0.8rem; color: var(--text); }
 #ps-goalies-table td:nth-child(6) { color: var(--ot); }
 #ps-goalies-table td:nth-child(7) { color: var(--gold); }
 
+
 /* Player name hyperlinks in stats tables */
 .ps-player-link {
   cursor: pointer;
@@ -659,6 +739,25 @@ tbody td { padding: 0.65rem 0.8rem; color: var(--text); }
 }
 .ps-player-link:hover { color: var(--gold); text-decoration-color: var(--gold); }
 .ps-player-link.ps-link-loading { opacity: 0.55; cursor: wait; }
+
+/* Player confirmed to have no ESPN profile — looks like plain text */
+.ps-player-link.ps-link-no-espn {
+  cursor: default;
+  text-decoration: none;
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+/* URL resolved but popup was blocked — pulse gold to prompt a second click */
+.ps-player-link.ps-link-ready {
+  color: var(--gold);
+  text-decoration-color: var(--gold);
+}
+.ps-player-link.ps-link-ready::after {
+  content: " ↗";
+  font-size: 0.75em;
+  opacity: 0.8;
+}
 
 /* Goalie table sort */
 #ps-goalies-table thead th.sortable { cursor: pointer; }
@@ -694,6 +793,22 @@ tbody td { padding: 0.65rem 0.8rem; color: var(--text); }
 }
 .ps-sub-row:hover td { background: var(--surface2); }
 .ps-sub-row td:first-child { padding-left: 2rem; color: var(--text-dim); }
+
+/* Per-player expandable rows */
+.ps-player-row { cursor: pointer; }
+.ps-player-row:hover td { background: var(--surface2); }
+.ps-player-row.ps-row-open .ps-expand-icon { transform: rotate(90deg); }
+.ps-team-sub-row { cursor: pointer; }
+.ps-team-sub-row:hover td { background: var(--surface2); }
+.ps-team-sub-row.ps-row-open .ps-expand-icon { transform: rotate(90deg); }
+.ps-game-detail-row td {
+  background: rgba(255,255,255,0.012);
+  border-bottom: 1px solid rgba(255,255,255,0.025);
+  font-size: 0.83rem;
+  color: var(--text-dim);
+}
+.ps-game-detail-row td:first-child { padding-left: 2.5rem; }
+.ps-game-detail-row:hover td { background: rgba(255,255,255,0.03); }
 
 /* ── Scoring row team logo + score snapshot ── */
 .score-team-logo { display:inline-flex; align-items:center; flex-shrink:0; margin-top:1px; }

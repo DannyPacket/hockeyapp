@@ -252,7 +252,11 @@
       <span class="filter-label">Position:</span>
       <button class="pill active" data-ps-pos="skater">Skater</button>
       <button class="pill" data-ps-pos="goalie">Goalie</button>
-      <span class="filter-label" style="margin-left:0.75rem">Team:</span>
+      <span class="filter-sep"></span>
+      <span class="filter-label">Min GP:</span>
+      <input type="number" id="ps-min-gp" class="ps-min-gp-input" min="1" max="999" value="1">
+      <span class="filter-sep"></span>
+      <span class="filter-label">Team:</span>
       <div class="ps-team-dropdown" id="ps-team-dropdown">
         <button class="pill ps-team-btn" id="ps-team-btn">
           <span id="ps-team-label">All Teams</span><span class="chevron">▾</span>

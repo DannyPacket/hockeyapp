@@ -9,7 +9,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // ── File-based game data cache ───────────────────────────────
 const CACHE_DIR = path.join(__dirname, "cache");
@@ -47,37 +47,287 @@ function savePlayerIds(ids) {
   try { fs.writeFileSync(PLAYER_IDS_FILE, JSON.stringify(ids)); } catch (_) {}
 }
 
+// Scan all cached game JSON files and extract ESPN player IDs from star headshot URLs.
+// Headshots embed the ESPN athlete ID: https://a.espncdn.com/i/headshots/nhl/players/full/{ID}.png
+// Called at startup to build/refresh player_ids.json from local data.
+function prefillPlayerIdsFromCache() {
+  const HEADSHOT_RE = /\/full\/(\d+)\.png/;
+  const ids = readPlayerIds();
+  let added = 0;
+  try {
+    const files = fs.readdirSync(CACHE_DIR).filter(f => f.endsWith(".json") && f !== "player_ids.json");
+    for (const file of files) {
+      try {
+        const d = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, file), "utf8"));
+        for (const st of (d.stars || [])) {
+          if (st?.name && st?.headshot && !ids[st.name]) {
+            const m = st.headshot.match(HEADSHOT_RE);
+            if (m) { ids[st.name] = m[1]; added++; }
+          }
+        }
+        // Also check scoring play headshots (present in NHL API data path)
+        for (const sp of (d.scoringPlays || [])) {
+          if (sp?.scorer && sp?.headshot && !ids[sp.scorer]) {
+            const m = sp.headshot.match(HEADSHOT_RE);
+            if (m) { ids[sp.scorer] = m[1]; added++; }
+          }
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+  if (added) {
+    savePlayerIds(ids);
+    console.log(`[player IDs] Built ${Object.keys(ids).length} entries from cache (${added} new).`);
+  }
+}
+
+// Search cached game files for an ESPN headshot URL for a specific player name.
+function findPlayerIdInCache(name) {
+  const HEADSHOT_RE = /\/full\/(\d+)\.png/;
+  const nameLower = name.toLowerCase();
+  try {
+    const files = fs.readdirSync(CACHE_DIR).filter(f => f.endsWith(".json") && f !== "player_ids.json");
+    for (const file of files) {
+      try {
+        const d = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, file), "utf8"));
+        for (const st of (d.stars || [])) {
+          if ((st?.name || "").toLowerCase() === nameLower && st.headshot) {
+            const m = st.headshot.match(HEADSHOT_RE);
+            if (m) return m[1];
+          }
+        }
+        for (const sp of (d.scoringPlays || [])) {
+          if ((sp?.scorer || "").toLowerCase() === nameLower && sp.headshot) {
+            const m = sp.headshot.match(HEADSHOT_RE);
+            if (m) return m[1];
+          }
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+  return null;
+}
+
+// Build ESPN player URL from ID + display name
+function buildEspnPlayerUrl(id, displayName) {
+  const slug = displayName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return `https://www.espn.com/nhl/player/stats/_/id/${id}/${slug}`;
+}
+
+// All ESPN NHL team IDs — verified via https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/teams
+const ESPN_NHL_TEAMS = {
+  ANA: 25, BOS: 1,  BUF: 2,  CGY: 3,  CAR: 7,  CHI: 4,  COL: 17, CBJ: 29,
+  DAL: 9,  DET: 5,  EDM: 6,  FLA: 26, LAK: 8,  MIN: 30, MTL: 10, NSH: 27,
+  NJD: 11, NYI: 12, NYR: 13, OTT: 14, PHI: 15, PIT: 16, SJS: 18, SEA: 124292,
+  STL: 19, TBL: 20, TOR: 21, UTA: 129764, VAN: 22, VGK: 37, WSH: 23, WPG: 28,
+};
+const ESPN_ALL_TEAM_IDS = Object.values(ESPN_NHL_TEAMS);
+
+// Fetch all 32 NHL team rosters from ESPN and save player IDs.
+// Called once at server startup so the first player-link click is always instant.
+async function fetchAllEspnRosters() {
+  const ids = readPlayerIds();
+  let added = 0;
+  for (const teamId of [1, ...ESPN_ALL_TEAM_IDS.filter(id => id !== 1)]) {
+    try {
+      const r = await fetch(
+        `https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/teams/${teamId}/roster`
+      );
+      if (!r.ok) continue;
+      const j = await r.json();
+      const players = (j.athletes || []).flatMap(g => g.items || []);
+      for (const p of players) {
+        const pName = p.displayName || p.fullName || "";
+        if (p.id && pName && !ids[pName]) {
+          ids[pName] = String(p.id);
+          added++;
+        }
+      }
+    } catch (_) {}
+  }
+  if (added) {
+    savePlayerIds(ids);
+    console.log(`[player IDs] Added ${added} players from all ESPN NHL rosters (total: ${Object.keys(ids).length}).`);
+  }
+}
+
+// Fetch ALL NHL athletes (active + historical) from ESPN's core API.
+// Dynamically fetches all pages (currently 12 × 1000 = ~11,702 athletes), then
+// batch-fetches player names for any IDs not already cached.
+// Covers retired players that aren't on any current roster.
+async function fetchAllEspnAthletes() {
+  const ids = readPlayerIds();
+  const existingIds = new Set(Object.values(ids));
+
+  // Collect all athlete IDs from the ESPN core NHL athletes endpoint (all pages)
+  const allAthleteIds = [];
+  let pageCount = 999; // updated after first request
+  try {
+    for (let page = 1; page <= pageCount; page++) {
+      const r = await fetch(
+        `https://sports.core.api.espn.com/v2/sports/hockey/leagues/nhl/athletes?limit=1000&page=${page}&lang=en&region=us`
+      );
+      if (!r.ok) break;
+      const j = await r.json();
+      if (page === 1) pageCount = j.pageCount || 999; // set real limit from first response
+      const items = j.items || [];
+      if (!items.length) break;
+      for (const item of items) {
+        const m = (item.$ref || "").match(/athletes\/(\d+)/);
+        if (m && !existingIds.has(m[1])) allAthleteIds.push(m[1]);
+      }
+      if (items.length < 1000) break; // last page (shorter than full page)
+    }
+  } catch (_) {}
+
+  if (!allAthleteIds.length) return;
+
+  // Batch-fetch athlete details (name) for IDs not yet in our cache
+  const CONCURRENCY = 50;
+  let added = 0;
+  for (let i = 0; i < allAthleteIds.length; i += CONCURRENCY) {
+    await Promise.all(
+      allAthleteIds.slice(i, i + CONCURRENCY).map(async athleteId => {
+        try {
+          const r = await fetch(
+            `https://sports.core.api.espn.com/v2/sports/hockey/leagues/nhl/athletes/${athleteId}?lang=en&region=us`
+          );
+          if (!r.ok) return;
+          const j = await r.json();
+          const name = j.displayName || j.fullName || "";
+          if (name && !ids[name]) {
+            ids[name] = athleteId;
+            added++;
+          }
+        } catch (_) {}
+      })
+    );
+  }
+
+  if (added) {
+    savePlayerIds(ids);
+    console.log(`[player IDs] Added ${added} historical athletes from ESPN core API (total: ${Object.keys(ids).length}).`);
+  }
+}
+
+// Per-request roster lookup: try all teams in parallel for a specific player name.
+// Used only when the player_ids.json cache misses (rare after startup prefetch).
+async function lookupPlayerInEspnRosters(name) {
+  const nameLower = name.toLowerCase();
+  // Bruins first, then all others in parallel batches of 8
+  const ordered = [1, ...ESPN_ALL_TEAM_IDS.filter(id => id !== 1)];
+  const BATCH = 8;
+  for (let i = 0; i < ordered.length; i += BATCH) {
+    const batch = ordered.slice(i, i + BATCH);
+    const results = await Promise.all(
+      batch.map(async teamId => {
+        try {
+          const r = await fetch(
+            `https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/teams/${teamId}/roster`
+          );
+          if (!r.ok) return null;
+          const j = await r.json();
+          const players = (j.athletes || []).flatMap(g => g.items || []);
+          const found = players.find(p =>
+            (p.displayName || p.fullName || "").toLowerCase() === nameLower
+          );
+          return found?.id ? { id: String(found.id), name: found.displayName || name } : null;
+        } catch (_) { return null; }
+      })
+    );
+    const hit = results.find(Boolean);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 async function handleEspnPlayer(res, params) {
   const name = (params.name || "").trim();
   if (!name) { sendJSON(res, 400, { error: "name required" }); return; }
 
+  // 1. Check persistent player_ids.json cache
   const ids = readPlayerIds();
   if (ids[name]) {
-    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-    sendJSON(res, 200, { id: ids[name], url: `https://www.espn.com/nhl/player/stats/_/id/${ids[name]}/${slug}` });
+    sendJSON(res, 200, { id: ids[name], url: buildEspnPlayerUrl(ids[name], name) });
     return;
   }
 
-  try {
-    const r = await fetch(`https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/athletes?limit=5&q=${encodeURIComponent(name)}`);
-    const j = await r.json();
-    const items = j.items || j.athletes || [];
-    const match = items.find(a => {
-      const dn = (a.athlete?.displayName || a.displayName || a.fullName || "").toLowerCase();
-      return dn === name.toLowerCase();
-    }) || items[0];
-    const ath = match?.athlete || match;
-    if (!ath?.id) { sendJSON(res, 404, { error: "not found" }); return; }
-
+  // 2. Scan cached game files for star/play headshots containing ESPN IDs
+  const cachedId = findPlayerIdInCache(name);
+  if (cachedId) {
     const newIds = readPlayerIds();
-    newIds[name] = String(ath.id);
+    newIds[name] = cachedId;
     savePlayerIds(newIds);
-
-    const slug = (ath.displayName || name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-    sendJSON(res, 200, { id: String(ath.id), url: `https://www.espn.com/nhl/player/stats/_/id/${ath.id}/${slug}` });
-  } catch (e) {
-    sendJSON(res, 500, { error: e.message });
+    sendJSON(res, 200, { id: cachedId, url: buildEspnPlayerUrl(cachedId, name) });
+    return;
   }
+
+  // 3. ESPN Bruins roster lookup (works even when search API is down)
+  try {
+    const rosterResult = await lookupPlayerInEspnRosters(name);
+    if (rosterResult) {
+      const newIds = readPlayerIds();
+      newIds[name] = rosterResult.id;
+      savePlayerIds(newIds);
+      sendJSON(res, 200, { id: rosterResult.id, url: buildEspnPlayerUrl(rosterResult.id, rosterResult.name) });
+      return;
+    }
+  } catch (_) {}
+
+  // 4. ESPN common search API (may be down, but try anyway)
+  try {
+    const r = await fetch(
+      `https://site.api.espn.com/apis/common/v3/search?query=${encodeURIComponent(name)}&limit=10&type=players`
+    );
+    if (r.ok) {
+      const j = await r.json();
+      for (const group of (j.results || [])) {
+        for (const item of (group.contents || [])) {
+          if ((item.displayName || "").toLowerCase() === name.toLowerCase() && item.id) {
+            const newIds = readPlayerIds();
+            newIds[name] = String(item.id);
+            savePlayerIds(newIds);
+            sendJSON(res, 200, { id: String(item.id), url: buildEspnPlayerUrl(item.id, item.displayName) });
+            return;
+          }
+        }
+      }
+      // No exact match — take first result if available
+      const first = (j.results || [])[0]?.contents?.[0];
+      if (first?.id) {
+        const newIds = readPlayerIds();
+        newIds[name] = String(first.id);
+        savePlayerIds(newIds);
+        sendJSON(res, 200, { id: String(first.id), url: buildEspnPlayerUrl(first.id, first.displayName || name) });
+        return;
+      }
+    }
+  } catch (_) {}
+
+  // 5. ESPN NHL athletes search (may return 404 — kept as last resort)
+  try {
+    const r2 = await fetch(
+      `https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/athletes?search=${encodeURIComponent(name)}&limit=5`
+    );
+    if (r2.ok) {
+      const j2 = await r2.json();
+      const items = j2.items || j2.athletes || [];
+      const match = items.find(a => {
+        const dn = (a.athlete?.displayName || a.displayName || a.fullName || "").toLowerCase();
+        return dn === name.toLowerCase();
+      }) || items[0];
+      const ath = match?.athlete || match;
+      if (ath?.id) {
+        const newIds = readPlayerIds();
+        newIds[name] = String(ath.id);
+        savePlayerIds(newIds);
+        sendJSON(res, 200, { id: String(ath.id), url: buildEspnPlayerUrl(ath.id, ath.displayName || name) });
+        return;
+      }
+    }
+  } catch (_) {}
+
+  sendJSON(res, 404, { error: "not found" });
 }
 
 const SHEET_CSV_URL =
@@ -587,6 +837,19 @@ async function handleEspnGame(res, params) {
       }
     }
 
+    // For older games the NHL API returns a landing page but no playerByGameStats,
+    // so result.goalies ends up empty. Supplement from the ESPN boxscore which
+    // stores goalie stats for historical games.
+    if (result && !result.goalies?.length && espnId) {
+      try {
+        const espnSupp = await fetchEspnGameData(espnId);
+        if (espnSupp?.goalies?.length) {
+          result.goalies = espnSupp.goalies;
+          console.log(`[goalie supplement] filled ${espnSupp.goalies.length} goalies from ESPN for ${isoDate}`);
+        }
+      } catch (_) {}
+    }
+
     // Fallback: ESPN by eventId or date
     if (!result) {
       if (!espnId && date) {
@@ -664,4 +927,11 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, () => {
   console.log(`\nHockey App running at http://localhost:${PORT}`);
   console.log("Press Ctrl+C to stop.\n");
+  // 1. Fast: mine ESPN IDs from cached game files (no network, instant)
+  prefillPlayerIdsFromCache();
+  // 2. Background: fetch all 32 NHL team rosters to cover every current player
+  fetchAllEspnRosters()
+    // 3. Then fetch ALL historical athletes to cover retired players
+    .then(() => fetchAllEspnAthletes())
+    .catch(() => {});
 });
