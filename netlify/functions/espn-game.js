@@ -57,9 +57,10 @@ function periodLabel(pd) {
 
 // ── NHL primary data fetch ────────────────────────────────────
 async function fetchNhlGameData(nhlGameId) {
-  const [landingRes, railRes] = await Promise.all([
+  const [landingRes, railRes, boxRes] = await Promise.all([
     fetch(`https://api-web.nhle.com/v1/gamecenter/${nhlGameId}/landing`),
     fetch(`https://api-web.nhle.com/v1/gamecenter/${nhlGameId}/right-rail`),
+    fetch(`https://api-web.nhle.com/v1/gamecenter/${nhlGameId}/boxscore`),
   ]);
   if (!landingRes.ok) throw new Error(`NHL API error: ${landingRes.status}`);
   const raw = await landingRes.json();
@@ -160,7 +161,40 @@ async function fetchNhlGameData(nhlGameId) {
     }).filter(Boolean);
   }
 
-  return { score, periods, scoringPlays, stars, teamStats };
+  // Goalies from NHL boxscore
+  const goalies = [];
+  if (boxRes?.ok) {
+    try {
+      const box    = await boxRes.json();
+      const awayAbbr = (raw.awayTeam?.abbrev || "").toUpperCase();
+      const homeAbbr = (raw.homeTeam?.abbrev || "").toUpperCase();
+      const extractNhlGoalies = (glList, abbr) => {
+        for (const g of (glList || [])) {
+          const name = g.name?.default
+            || `${g.firstName?.default || ""} ${g.lastName?.default || ""}`.trim();
+          if (!name) continue;
+          // NHL API sets decision only for the deciding goalie ("W" or "L"); others get ""
+          const rawDec = (g.decision || "").trim().toUpperCase();
+          const decision = rawDec === "W" ? "W" : rawDec === "L" ? "L" : null;
+          // Only include goalies who have an explicit decision (starter) or at least some saves
+          if (!decision && g.saves == null) continue;
+          goalies.push({
+            name,
+            team: abbr,
+            decision: decision || (abbr === awayAbbr
+              ? (parseInt(score.awayScore,10) > parseInt(score.homeScore,10) ? "W" : "L")
+              : (parseInt(score.homeScore,10) > parseInt(score.awayScore,10) ? "W" : "L")),
+            saves:        typeof g.saves        === "number" ? g.saves        : null,
+            goalsAgainst: typeof g.goalsAgainst === "number" ? g.goalsAgainst : null,
+          });
+        }
+      };
+      extractNhlGoalies(box.playerByGameStats?.awayTeam?.goalies, awayAbbr);
+      extractNhlGoalies(box.playerByGameStats?.homeTeam?.goalies, homeAbbr);
+    } catch (_) {}
+  }
+
+  return { score, periods, scoringPlays, stars, teamStats, goalies };
 }
 
 // ── ESPN fallback ─────────────────────────────────────────────
@@ -347,7 +381,42 @@ async function fetchEspnGameData(id) {
   const ppIdx = teamStats.findIndex(s => s.label === "PIM");
   teamStats.splice(ppIdx + 1, 0, { label: "Power Play", away: `${awPPG}/${awPPO}`, home: `${hmPPG}/${hmPPO}` });
 
-  return { score, periods, scoringPlays, stars, teamStats };
+  // Goalies from ESPN boxscore players
+  const goalies = [];
+  const awayScore = parseInt(score.awayScore, 10);
+  const homeScore = parseInt(score.homeScore, 10);
+  for (const teamPlayers of (raw.boxscore?.players || [])) {
+    const teamId   = String(teamPlayers.team?.id || "");
+    const teamAbbr = (teamAbbrById[teamId] || teamPlayers.team?.abbreviation || "").toUpperCase();
+    const isAway   = teamAbbr === score.awayAbbr.toUpperCase();
+    const teamWon  = isAway ? awayScore > homeScore : homeScore > awayScore;
+    const derivedDecision = teamWon ? "W" : "L";
+    for (const group of (teamPlayers.statistics || [])) {
+      if (!(group.name || "").toLowerCase().includes("goali")) continue;
+      const keys = group.keys || [];
+      for (const entry of (group.athletes || [])) {
+        const name = entry.athlete?.displayName || entry.athlete?.fullName || "";
+        if (!name) continue;
+        const statObj = {};
+        (entry.stats || []).forEach((v, i) => { if (keys[i]) statObj[keys[i]] = v; });
+        const saves = statObj.saves != null ? parseInt(statObj.saves, 10) : null;
+        const goalsAgainst = statObj.goalsAgainst != null ? parseInt(statObj.goalsAgainst, 10) : null;
+        // ESPN sometimes provides a "decision" key: "W", "L", "OT", or ""
+        const rawDec = (statObj.decision || "").toUpperCase();
+        const decision = rawDec === "W" ? "W" : rawDec === "L" ? "L" : derivedDecision;
+        goalies.push({
+          name,
+          team:         teamAbbr,
+          decision,
+          saves:        !isNaN(saves)        && saves        != null ? saves        : null,
+          goalsAgainst: !isNaN(goalsAgainst) && goalsAgainst != null ? goalsAgainst : null,
+        });
+      }
+    }
+  }
+  console.log("[ESPN] goalies found:", goalies.length, goalies.map(g => g.name));
+
+  return { score, periods, scoringPlays, stars, teamStats, goalies };
 }
 
 // ── Handler ───────────────────────────────────────────────────
