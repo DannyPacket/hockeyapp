@@ -1554,6 +1554,44 @@ function aggregateGoalieStats(games) {
     }
   }
 
+  // Merge abbreviated names (e.g. "T.Rask" / "T. Rask") into the matching
+  // full-name entry when both exist in byGoalie.
+  for (const aName of Object.keys(byGoalie)) {
+    if (!byGoalie[aName]) continue;
+    // Match patterns like "T.Rask" or "T. Rask" (one capital letter, dot, optional space, last name)
+    const m = aName.match(/^([A-Z])\.?\s*([A-Za-z'\-]+)$/);
+    if (!m) continue;
+    const [, initial, lastName] = m;
+    // Look for a canonical full-name entry: "Firstname Lastname" where Firstname starts with `initial`
+    const fullName = Object.keys(byGoalie).find(n => {
+      if (n === aName || !byGoalie[n]) return false;
+      if (/^[A-Z]\./.test(n)) return false;     // don't merge two abbreviations
+      const parts = n.trim().split(/\s+/);
+      if (parts.length < 2) return false;
+      return parts[0][0].toUpperCase() === initial &&
+             parts[parts.length - 1].toLowerCase() === lastName.toLowerCase();
+    });
+    if (!fullName) continue;
+    // Merge aName's per-team data into fullName
+    const src = byGoalie[aName];
+    const dst = byGoalie[fullName];
+    for (const [abbr, e] of Object.entries(src.perTeam)) {
+      if (!dst.perTeam[abbr]) {
+        dst.perTeam[abbr] = e;
+      } else {
+        const t = dst.perTeam[abbr];
+        t.w += e.w; t.l += e.l; t.otl += e.otl; t.so += e.so; t.pts += e.pts;
+        t.stars += e.stars; t.star1 += e.star1; t.star2 += e.star2; t.star3 += e.star3;
+        t.gp += e.gp; t.saves += (e.saves||0); t.sa += (e.sa||0);
+        for (const d of (e.gamesSeen || new Set())) t.gamesSeen.add(d);
+        for (const gm of (e.gamesList || [])) {
+          if (!t.gamesList.some(x => x.date === gm.date)) t.gamesList.push(gm);
+        }
+      }
+    }
+    delete byGoalie[aName];
+  }
+
   // Flatten
   return Object.entries(byGoalie).map(([name, data]) => {
     const teams   = Object.keys(data.perTeam);

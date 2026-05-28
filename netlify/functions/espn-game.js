@@ -333,7 +333,7 @@ async function fetchEspnGameData(id) {
       }
       return {
         order:    STAR_ORDER[fa.name],
-        name:     ath.displayName || ath.fullName || ath.shortName || "",
+        name:     ath.fullName || ath.displayName || ath.shortName || "",
         team:     teamAbbr,
         pos:      ath.position?.abbreviation || "",
         headshot: ath.headshot?.href || (typeof ath.headshot === "string" ? ath.headshot : "") || "",
@@ -395,7 +395,7 @@ async function fetchEspnGameData(id) {
       if (!(group.name || "").toLowerCase().includes("goali")) continue;
       const keys = group.keys || [];
       for (const entry of (group.athletes || [])) {
-        const name = entry.athlete?.displayName || entry.athlete?.fullName || "";
+        const name = entry.athlete?.fullName || entry.athlete?.displayName || "";
         if (!name) continue;
         const statObj = {};
         (entry.stats || []).forEach((v, i) => { if (keys[i]) statObj[keys[i]] = v; });
