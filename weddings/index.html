@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weddings — Packey</title>
+  <link rel="stylesheet" href="../css/style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+</head>
+<body data-category="weddings">
+
+<header>
+  <div class="header-inner">
+    <div class="site-title">🧭 Packey</div>
+    <nav class="main-nav">
+      <a href="../index.html">Home</a>
+      <a href="../hockey/index.html">Hockey</a>
+      <a href="index.html" class="active">Weddings</a>
+      <a href="../concerts/index.html">Concerts</a>
+      <a href="../living-situations/index.html">Living Situations</a>
+    </nav>
+  </div>
+</header>
+
+<main class="gated">
+  <div id="gate-overlay">
+    <div class="gate-icon">🔒</div>
+    <h2>Private Page</h2>
+    <p>Enter the passcode to continue.</p>
+    <form id="gate-form" autocomplete="off">
+      <input type="password" id="gate-input" inputmode="numeric" placeholder="Passcode" />
+      <button type="submit">Unlock</button>
+    </form>
+    <div id="gate-error" class="gate-error"></div>
+  </div>
+
+  <div class="page-hero">
+    <div>
+      <div class="page-eyebrow">Category</div>
+      <h1 class="page-title">💍 <span class="accent">Weddings</span></h1>
+      <p class="page-intro">Every wedding I've been lucky enough to celebrate at — who tied the knot, where it happened, and the moments worth remembering.</p>
+    </div>
+    <a class="sheet-link" href="https://docs.google.com/spreadsheets/d/1hyLJ-8UEdIiz1XnHGS5TTZdECbwkMVM3SZ95Pusti_M/edit?gid=889524951#gid=889524951" target="_blank" rel="noopener">Edit Sheet ↗</a>
+  </div>
+
+  <div class="section-heading">Entries</div>
+  <div id="entries-status" class="entries-status">Loading entries…</div>
+
+  <div class="map-toolbar">
+    <div class="map-toolbar-hint" id="map-hint"></div>
+    <button id="map-toggle" class="collapse-toggle" type="button">▾ Hide Map</button>
+  </div>
+
+  <div id="wedding-map" class="map-container"></div>
+
+  <div class="filters-bar">
+    <div class="filter-field">
+      <label for="filter-whose">Whose Wedding</label>
+      <input type="text" id="filter-whose" placeholder="Search by name…" />
+    </div>
+    <div class="filter-field">
+      <label for="filter-connection">Connection</label>
+      <select id="filter-connection"><option value="">All</option></select>
+    </div>
+    <div class="filter-field">
+      <label for="filter-plus1">Plus 1</label>
+      <select id="filter-plus1"><option value="">All</option></select>
+    </div>
+  </div>
+
+  <div class="table-wrap" id="table-wrap">
+    <table class="entries-table">
+      <thead>
+        <tr>
+          <th data-sort="Date">Date</th>
+          <th data-sort="Whose Wedding">Whose Wedding</th>
+          <th data-sort="Connection">Connection</th>
+          <th data-sort="Plus 1">Plus 1</th>
+          <th data-sort="Location">Location</th>
+          <th data-sort="Official Album">Official Album</th>
+          <th data-sort="Google Album">Google Album</th>
+        </tr>
+      </thead>
+      <tbody id="entries"></tbody>
+    </table>
+  </div>
+</main>
+
+<footer>Packey — a personal log of adventures.</footer>
+
+<script src="../js/app.js" defer></script>
+</body>
+</html>

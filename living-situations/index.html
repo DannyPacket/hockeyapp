@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Living Situations — Packey</title>
+  <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body data-category="living-situations">
+
+<header>
+  <div class="header-inner">
+    <div class="site-title">🧭 Packey</div>
+    <nav class="main-nav">
+      <a href="../index.html">Home</a>
+      <a href="../hockey/index.html">Hockey</a>
+      <a href="../weddings/index.html">Weddings</a>
+      <a href="../concerts/index.html">Concerts</a>
+      <a href="index.html" class="active">Living Situations</a>
+    </nav>
+  </div>
+</header>
+
+<main class="gated">
+  <div id="gate-overlay">
+    <div class="gate-icon">🔒</div>
+    <h2>Private Page</h2>
+    <p>Enter the passcode to continue.</p>
+    <form id="gate-form" autocomplete="off">
+      <input type="password" id="gate-input" inputmode="numeric" placeholder="Passcode" />
+      <button type="submit">Unlock</button>
+    </form>
+    <div id="gate-error" class="gate-error"></div>
+  </div>
+
+  <div class="page-hero">
+    <div>
+      <div class="page-eyebrow">Category</div>
+      <h1 class="page-title">🏠 <span class="accent">Living Situations</span></h1>
+      <p class="page-intro">Every place I've called home — apartments, roommates, and the story behind each move.</p>
+    </div>
+    <a class="sheet-link" href="https://docs.google.com/spreadsheets/d/1hyLJ-8UEdIiz1XnHGS5TTZdECbwkMVM3SZ95Pusti_M/edit?gid=499935000#gid=499935000" target="_blank" rel="noopener">Edit Sheet ↗</a>
+  </div>
+
+  <div class="section-heading">Timeline</div>
+  <div id="entries-status" class="entries-status">Loading timeline…</div>
+  <div id="entries" class="timeline"></div>
+</main>
+
+<footer>Packey — a personal log of adventures.</footer>
+
+<script src="../js/app.js" defer></script>
+</body>
+</html>

@@ -1,8 +1,9 @@
 {
-  "name": "hockeyapp",
+  "name": "packeyapp",
   "version": "1.0.0",
-  "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "geocode:weddings": "node scripts/geocode-weddings.js",
+    "geocode:concerts": "node scripts/geocode-concerts.js"
   }
 }

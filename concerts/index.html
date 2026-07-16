@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Concerts — Packey</title>
+  <link rel="stylesheet" href="../css/style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+</head>
+<body data-category="concerts">
+
+<header>
+  <div class="header-inner">
+    <div class="site-title">🧭 Packey</div>
+    <nav class="main-nav">
+      <a href="../index.html">Home</a>
+      <a href="../hockey/index.html">Hockey</a>
+      <a href="../weddings/index.html">Weddings</a>
+      <a href="index.html" class="active">Concerts</a>
+      <a href="../living-situations/index.html">Living Situations</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="page-hero">
+    <div>
+      <div class="page-eyebrow">Category</div>
+      <h1 class="page-title">🎤 <span class="accent">Concerts</span></h1>
+      <p class="page-intro">Shows I've been to — the artists, the venues, and the nights worth remembering.</p>
+    </div>
+    <a class="sheet-link" href="https://docs.google.com/spreadsheets/d/1hyLJ-8UEdIiz1XnHGS5TTZdECbwkMVM3SZ95Pusti_M/edit?gid=1410391466#gid=1410391466" target="_blank" rel="noopener">Edit Sheet ↗</a>
+  </div>
+
+  <div class="section-heading">Entries</div>
+  <div id="entries-status" class="entries-status">Loading entries…</div>
+
+  <div class="map-toolbar">
+    <div class="map-toolbar-hint" id="map-hint"></div>
+    <button id="map-toggle" class="collapse-toggle" type="button">▾ Hide Map</button>
+  </div>
+
+  <div id="concert-map" class="map-container"></div>
+
+  <div class="filters-bar">
+    <div class="filter-field">
+      <label for="filter-band">Band</label>
+      <select id="filter-band"><option value="">All</option></select>
+    </div>
+    <div class="filter-field">
+      <label for="filter-location">Location</label>
+      <select id="filter-location"><option value="">All</option></select>
+    </div>
+    <div class="filter-field">
+      <label for="filter-guest">Guest</label>
+      <input type="text" id="filter-guest" placeholder="Search by guest…" />
+    </div>
+  </div>
+
+  <div class="table-wrap" id="table-wrap">
+    <table class="entries-table">
+      <thead>
+        <tr>
+          <th data-sort="Date">Date</th>
+          <th data-sort="Band">Band</th>
+          <th data-sort="Opening Act">Opening Act</th>
+          <th data-sort="Tour">Tour</th>
+          <th data-sort="Location">Location</th>
+          <th data-sort="Guest">Guest</th>
+          <th data-sort="Set List">Set List</th>
+        </tr>
+      </thead>
+      <tbody id="entries"></tbody>
+    </table>
+  </div>
+</main>
+
+<footer>Packey — a personal log of adventures.</footer>
+
+<script src="../js/app.js" defer></script>
+</body>
+</html>

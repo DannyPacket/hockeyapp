@@ -1,0 +1,66 @@
+{
+  "Comcast Center": {
+    "lat": 41.9924449,
+    "lon": -71.2196119
+  },
+  "The Middle East - Upstairs": {
+    "lat": 42.3637705,
+    "lon": -71.1013224
+  },
+  "Gillette Stadium": {
+    "lat": 42.0908879,
+    "lon": -71.2641731
+  },
+  "House of Blues - Boston": {
+    "lat": 42.3474108,
+    "lon": -71.0955967
+  },
+  "Fenway Park": {
+    "lat": 42.3464614,
+    "lon": -71.0970999
+  },
+  "TD Garden": {
+    "lat": 42.3662986,
+    "lon": -71.0621622
+  },
+  "The Sinclair": {
+    "lat": 42.3740762,
+    "lon": -71.120629
+  },
+  "Xfinity Center": {
+    "lat": 41.9924449,
+    "lon": -71.2196119
+  },
+  "Paradise Rock Club": {
+    "lat": 42.35183,
+    "lon": -71.1194989
+  },
+  "Buffalo RiverWorks": {
+    "lat": 42.8693242,
+    "lon": -78.8722611
+  },
+  "Roadrunner": {
+    "lat": 42.3566205,
+    "lon": -71.1438739
+  },
+  "Cisco Brewers Nantucket": {
+    "lat": 41.2633815,
+    "lon": -70.1311524
+  },
+  "Rogers Stadium": {
+    "lat": 43.7461656,
+    "lon": -79.4692345
+  },
+  "Leader Bank Pavilion": {
+    "lat": 42.3485027,
+    "lon": -71.0359348
+  },
+  "MGM Music Hall at Fenway": {
+    "lat": 42.3466937,
+    "lon": -71.0954944
+  },
+  "The Stage at Suffolk Downs": {
+    "lat": 42.39051,
+    "lon": -70.9971875
+  }
+}
